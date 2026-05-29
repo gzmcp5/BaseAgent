@@ -110,6 +110,35 @@ class TestHookRegistry(unittest.TestCase):
         out = hooks.run("after_tool_execute", 3, tc)
         self.assertIsNone(out)
 
+    def test_after_tool_execute_falsy_result_preserved(self) -> None:
+        # 0, "", False are valid tool results — must not be swallowed by `or` pattern
+        from agent.core.agent import Agent
+        from agent.core.message import LLMResponse, ToolCall
+
+        for falsy_val in (0, "", False, []):
+            with self.subTest(result=falsy_val):
+                tool_resp = LLMResponse(
+                    content="",
+                    tool_calls=[ToolCall(id="x", name="zero", arguments={})],
+                )
+                final_resp = LLMResponse(content="done")
+                llm = MockLLM([tool_resp, final_resp])
+
+                from agent.core.tool import ToolRegistry
+                tools = ToolRegistry()
+
+                @tools.register(description="returns falsy value")
+                def zero() -> Any:
+                    return falsy_val
+
+                agent = Agent(llm=llm, tools=tools)
+                agent.run("go")
+                # Tool result message should contain str(falsy_val), not str(ToolCall)
+                tool_msgs = [m for m in agent.memory.messages
+                             if m.role == Role.TOOL]
+                self.assertEqual(len(tool_msgs), 1)
+                self.assertEqual(tool_msgs[0].content, str(falsy_val))
+
     def test_after_tool_execute_multi_hook_chain(self) -> None:
         # Each hook sees the latest result, not the original
         hooks = HookRegistry()

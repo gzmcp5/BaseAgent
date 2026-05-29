@@ -97,8 +97,10 @@ class Agent:
             except Exception as exc:
                 result = f"Error executing '{tool_call.name}': {exc}"
 
-        # Middleware: result is threaded first; tool_call is read-only context.
-        result = self.hooks.run("after_tool_execute", result, tool_call) or result
+        # Use explicit None check — `or` would swallow falsy results like 0 or "".
+        _r = self.hooks.run("after_tool_execute", result, tool_call)
+        if _r is not None:
+            result = _r
         return result
 
     def reset(self) -> None:
