@@ -43,7 +43,19 @@ class OllamaLLM(BaseLLM):
         return self._parse_response(data)
 
     def stream(self, messages: list[Message], **kwargs: Any) -> Iterator[str]:
-        raise NotImplementedError("Streaming not yet implemented")
+        """Stream text chunks from Ollama via NDJSON."""
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": self._format_messages(messages),
+            "stream": True,
+        }
+        url = f"{self.base_url}/api/chat"
+        for chunk in self._stream_ndjson(url, payload, {"Content-Type": "application/json"}):
+            text = chunk.get("message", {}).get("content", "")
+            if text:
+                yield text
+            if chunk.get("done"):
+                break
 
     # ------------------------------------------------------------------
 

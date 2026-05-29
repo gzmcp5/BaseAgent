@@ -48,7 +48,28 @@ class OpenAILLM(BaseLLM):
         return self._parse_response(data)
 
     def stream(self, messages: list[Message], **kwargs: Any) -> Iterator[str]:
-        raise NotImplementedError("Streaming not yet implemented")
+        """Stream text chunks via OpenAI SSE."""
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": self._format_messages(messages),
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+            "stream": True,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        for data_str in self._stream_sse(self.base_url, payload, headers):
+            if data_str == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data_str)
+            except json.JSONDecodeError:
+                continue
+            delta = chunk.get("choices", [{}])[0].get("delta", {})
+            text = delta.get("content") or ""
+            if text:
+                yield text
 
     # ------------------------------------------------------------------
 

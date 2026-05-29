@@ -52,7 +52,38 @@ class ClaudeLLM(BaseLLM):
         return self._parse_response(data)
 
     def stream(self, messages: list[Message], **kwargs: Any) -> Iterator[str]:
-        raise NotImplementedError("Streaming not yet implemented")
+        """Stream text chunks via Anthropic SSE.
+
+        Note: streaming does not support tool calls — use chat() for tool-enabled turns.
+        """
+        system_prompt, formatted = self._format_messages(messages)
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+            "messages": formatted,
+            "stream": True,
+        }
+        if system_prompt:
+            payload["system"] = system_prompt
+
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": _API_VERSION,
+            "content-type": "application/json",
+        }
+        for data_str in self._stream_sse(_API_URL, payload, headers):
+            if data_str == "[DONE]":
+                break
+            try:
+                event = json.loads(data_str)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") == "content_block_delta":
+                delta = event.get("delta", {})
+                if delta.get("type") == "text_delta":
+                    text = delta.get("text", "")
+                    if text:
+                        yield text
 
     # ------------------------------------------------------------------
     # Internal helpers
