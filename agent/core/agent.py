@@ -45,8 +45,9 @@ class Agent:
                 response = _resp
 
             if not response.tool_calls:
-                self.memory.add(Message(role=Role.ASSISTANT, content=response.content))
-                return response.content
+                content = response.content or ""
+                self.memory.add(Message(role=Role.ASSISTANT, content=content))
+                return content
 
             self.memory.add(
                 Message(

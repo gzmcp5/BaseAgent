@@ -55,24 +55,31 @@ class BaseLLM(ABC):
         raise last_exc  # pragma: no cover
 
     @staticmethod
+    def _safe_url(url: str) -> str:
+        """Strip query string from URL to avoid leaking secrets in error messages."""
+        return url.split("?")[0]
+
+    @staticmethod
     def _do_request(url: str, payload: dict, headers: dict) -> dict:
         """Single HTTP POST using stdlib urllib (no external deps)."""
         body = json.dumps(payload).encode()
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        safe = BaseLLM._safe_url(url)
         try:
             with urllib.request.urlopen(req) as resp:
                 return json.loads(resp.read())
         except urllib.error.HTTPError as exc:
             body_text = exc.read().decode(errors="replace")
-            raise RuntimeError(f"HTTP {exc.code} from {url}: {body_text}") from exc
+            raise RuntimeError(f"HTTP {exc.code} from {safe}: {body_text}") from exc
         except urllib.error.URLError as exc:
-            raise RuntimeError(f"Network error connecting to {url}: {exc.reason}") from exc
+            raise RuntimeError(f"Network error connecting to {safe}: {exc.reason}") from exc
 
     @staticmethod
     def _stream_sse(url: str, payload: dict, headers: dict) -> Iterator[str]:
         """Open an SSE stream; yield each `data:` payload as a raw string."""
         body = json.dumps(payload).encode()
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        safe = BaseLLM._safe_url(url)
         try:
             with urllib.request.urlopen(req) as resp:
                 for raw_line in resp:
@@ -81,13 +88,14 @@ class BaseLLM(ABC):
                         yield line[6:]
         except urllib.error.HTTPError as exc:
             body_text = exc.read().decode(errors="replace")
-            raise RuntimeError(f"HTTP {exc.code} from {url}: {body_text}") from exc
+            raise RuntimeError(f"HTTP {exc.code} from {safe}: {body_text}") from exc
 
     @staticmethod
     def _stream_ndjson(url: str, payload: dict, headers: dict) -> Iterator[dict]:
         """Open an NDJSON stream; yield parsed dicts (used by Ollama)."""
         body = json.dumps(payload).encode()
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        safe = BaseLLM._safe_url(url)
         try:
             with urllib.request.urlopen(req) as resp:
                 for raw_line in resp:
@@ -96,4 +104,4 @@ class BaseLLM(ABC):
                         yield json.loads(line)
         except urllib.error.HTTPError as exc:
             body_text = exc.read().decode(errors="replace")
-            raise RuntimeError(f"HTTP {exc.code} from {url}: {body_text}") from exc
+            raise RuntimeError(f"HTTP {exc.code} from {safe}: {body_text}") from exc

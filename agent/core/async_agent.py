@@ -18,6 +18,11 @@ class AsyncAgent:
     in a single turn are executed *concurrently* via asyncio.gather, which
     improves throughput when tools do I/O work.
 
+    Hook contract: all hooks registered via HookRegistry run on the event loop
+    thread, not in the executor.  Hooks must therefore be non-blocking and
+    free of thread-unsafe side effects.  Blocking I/O inside a hook will stall
+    the event loop.
+
     Usage::
 
         async with AsyncAgent(llm=llm, system_prompt="...", tools=tools) as agent:
@@ -72,8 +77,9 @@ class AsyncAgent:
                 response = _resp
 
             if not response.tool_calls:
-                self.memory.add(Message(role=Role.ASSISTANT, content=response.content))
-                return response.content
+                content = response.content or ""
+                self.memory.add(Message(role=Role.ASSISTANT, content=content))
+                return content
 
             self.memory.add(
                 Message(
