@@ -45,8 +45,8 @@ class GoogleLLM(BaseLLM):
                 {"function_declarations": [self._to_gemini_tool(t) for t in tools]}
             ]
 
-        url = f"{_BASE_URL}/{self.model}:generateContent?key={self.api_key}"
-        headers = {"Content-Type": "application/json"}
+        url = f"{_BASE_URL}/{self.model}:generateContent"
+        headers = {"Content-Type": "application/json", "x-goog-api-key": self.api_key}
         data = self._request(url, payload, headers)
         return self._parse_response(data)
 
@@ -64,11 +64,8 @@ class GoogleLLM(BaseLLM):
         if system_prompt:
             payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
 
-        url = (
-            f"{_BASE_URL}/{self.model}:streamGenerateContent"
-            f"?alt=sse&key={self.api_key}"
-        )
-        headers = {"Content-Type": "application/json"}
+        url = f"{_BASE_URL}/{self.model}:streamGenerateContent?alt=sse"
+        headers = {"Content-Type": "application/json", "x-goog-api-key": self.api_key}
         for data_str in self._stream_sse(url, payload, headers):
             if not data_str:
                 continue
