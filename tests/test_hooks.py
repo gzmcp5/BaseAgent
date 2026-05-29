@@ -89,18 +89,44 @@ class TestHookRegistry(unittest.TestCase):
         self.assertEqual(len(hooks), 1)
 
     def test_after_tool_execute_two_args(self) -> None:
+        # Signature: (result, tool_call) — result is threaded, tool_call is context
         hooks = HookRegistry()
         captured = []
 
         @hooks.on("after_tool_execute")
-        def capture(tool_call, result):
-            captured.append((tool_call.name, result))
+        def capture(result, tool_call):
+            captured.append((result, tool_call.name))
             return result.upper()
 
         tc = ToolCall(id="1", name="greet", arguments={})
-        out = hooks.run("after_tool_execute", tc, "hello")
+        out = hooks.run("after_tool_execute", "hello", tc)
         self.assertEqual(out, "HELLO")
-        self.assertEqual(captured, [("greet", "hello")])
+        self.assertEqual(captured, [("hello", "greet")])
+
+    def test_after_tool_execute_no_hooks_returns_none(self) -> None:
+        # Critical: no hooks → run() returns None, caller falls back to original result
+        hooks = HookRegistry()
+        tc = ToolCall(id="1", name="add", arguments={"a": 1, "b": 2})
+        out = hooks.run("after_tool_execute", 3, tc)
+        self.assertIsNone(out)
+
+    def test_after_tool_execute_multi_hook_chain(self) -> None:
+        # Each hook sees the latest result, not the original
+        hooks = HookRegistry()
+
+        @hooks.on("after_tool_execute")
+        def h1(result, tool_call):
+            return result * 2
+
+        @hooks.on("after_tool_execute")
+        def h2(result, tool_call):
+            # result here should be the output of h1 (6), not the original (3)
+            self.assertIsInstance(result, int)
+            return result + 1
+
+        tc = ToolCall(id="1", name="calc", arguments={})
+        out = hooks.run("after_tool_execute", 3, tc)
+        self.assertEqual(out, 7)  # (3*2)+1
 
     def test_hooks_integrated_with_agent(self) -> None:
         """Hook should be called inside Agent.run()."""

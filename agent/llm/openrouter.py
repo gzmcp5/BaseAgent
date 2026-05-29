@@ -17,6 +17,7 @@ class OpenRouterLLM(OpenAILLM):
         model: str = DEFAULT_MODEL,
         api_key: Optional[str] = None,
         max_tokens: int = 4096,
+        retry_config: Optional["RetryConfig"] = None,
     ) -> None:
         resolved_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
         super().__init__(
@@ -24,4 +25,5 @@ class OpenRouterLLM(OpenAILLM):
             api_key=resolved_key,
             base_url=_BASE_URL,
             max_tokens=max_tokens,
+            retry_config=retry_config,
         )

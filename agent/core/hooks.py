@@ -3,8 +3,6 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 
-# Each hook receives the current value and may return a transformed replacement.
-# If a hook returns None the value is passed through unchanged.
 HookFn = Callable[..., Any]
 
 _VALID_EVENTS = frozenset(
@@ -12,7 +10,7 @@ _VALID_EVENTS = frozenset(
         "before_llm_call",    # (messages: list[Message]) -> list[Message] | None
         "after_llm_response", # (response: LLMResponse)  -> LLMResponse | None
         "before_tool_execute",# (tool_call: ToolCall)     -> ToolCall | None
-        "after_tool_execute", # (tool_call: ToolCall, result: Any) -> Any | None
+        "after_tool_execute", # (result: Any, tool_call: ToolCall) -> Any | None
     }
 )
 
@@ -21,6 +19,18 @@ _VALID_EVENTS = frozenset(
 class HookRegistry:
     """Lightweight middleware pipeline for the Agent loop.
 
+    Each hook event threads its primary value through registered handlers.
+    Returning a non-None value from a hook replaces the current value;
+    returning None leaves it unchanged.
+
+    Event signatures:
+        before_llm_call(messages)          -> messages | None
+        after_llm_response(response)       -> response | None
+        before_tool_execute(tool_call)     -> tool_call | None
+        after_tool_execute(result, tool_call) -> result | None
+            - *result* is the primary value threaded through the chain.
+            - *tool_call* is read-only context forwarded to every handler.
+
     Usage::
 
         hooks = HookRegistry()
@@ -28,17 +38,17 @@ class HookRegistry:
         @hooks.on("before_llm_call")
         def log_messages(messages):
             print(f"Sending {len(messages)} messages to LLM")
-            # Return None to leave messages unchanged
 
         @hooks.on("after_tool_execute")
-        def audit_tool(tool_call, result):
-            print(f"Tool {tool_call.name} returned: {result}")
+        def redact(result, tool_call):
+            if "secret" in str(result):
+                return "[REDACTED]"
     """
 
     _registry: dict[str, list[HookFn]] = field(default_factory=dict, init=False)
 
     def on(self, event: str) -> Callable[[HookFn], HookFn]:
-        """Decorator to register a hook for *event*."""
+        """Decorator that registers a hook for *event*."""
         if event not in _VALID_EVENTS:
             raise ValueError(
                 f"Unknown event '{event}'. Valid events: {sorted(_VALID_EVENTS)}"
@@ -59,27 +69,25 @@ class HookRegistry:
         self._registry.setdefault(event, []).append(fn)
 
     def run(self, event: str, *args: Any) -> Any:
-        """Run all hooks for *event* in registration order.
+        """Thread args[0] through all handlers for *event*.
 
-        The first positional arg is threaded through the hook chain.
-        Each hook may return a replacement value; returning None keeps the
-        current value. Additional args (e.g. result in after_tool_execute)
-        are forwarded read-only.
+        Returns the (possibly transformed) first arg, or None when no
+        handlers are registered (callers must supply their own fallback).
         """
         handlers = self._registry.get(event, [])
         if not handlers:
-            return args[0] if args else None
+            return None  # caller uses `or original_value` as fallback
 
         value = args[0]
         extra = args[1:]
         for fn in handlers:
-            result = fn(value, *extra)
-            if result is not None:
-                value = result
+            candidate = fn(value, *extra)
+            if candidate is not None:
+                value = candidate
         return value
 
     def clear(self, event: Optional[str] = None) -> None:
-        """Remove hooks — all events if *event* is None, otherwise only that event."""
+        """Remove hooks — all events if *event* is None, otherwise that event only."""
         if event is None:
             self._registry.clear()
         else:

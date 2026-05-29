@@ -97,8 +97,8 @@ class Agent:
             except Exception as exc:
                 result = f"Error executing '{tool_call.name}': {exc}"
 
-        # Middleware: may rewrite the tool result
-        result = self.hooks.run("after_tool_execute", tool_call, result)
+        # Middleware: result is threaded first; tool_call is read-only context.
+        result = self.hooks.run("after_tool_execute", result, tool_call) or result
         return result
 
     def reset(self) -> None:
