@@ -33,6 +33,7 @@ PROVIDERS = [
     ("ollama", "Ollama local", None),
     ("openrouter", "OpenRouter", "OPENROUTER_API_KEY"),
 ]
+PROVIDER_KEYS = {name for name, _, _ in PROVIDERS}
 COMMAND_OPTIONS = [
     ("/reset", "Clear conversation history"),
     ("/provider", "Choose LLM provider and model"),
@@ -380,7 +381,7 @@ def load_saved_settings() -> dict[str, str]:
     settings = {}
     provider = data.get("provider")
     model = data.get("model")
-    if isinstance(provider, str) and provider:
+    if isinstance(provider, str) and provider in PROVIDER_KEYS:
         settings["provider"] = provider
     if isinstance(model, str) and model:
         settings["model"] = model

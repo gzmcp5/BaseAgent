@@ -63,12 +63,12 @@ pip install pyyaml
 git clone <repo-url>
 cd BaseAgent
 cp .env.example .env
-# 선택: .env 파일에 API 키 입력
+# 선택: .env 파일에 실제 API 키 입력
 ```
 
 ### 2. `.env` 파일 편집 (선택)
 
-CLI에서 provider를 선택할 때 API 키를 직접 입력할 수도 있습니다. 반복 사용한다면 `.env`에 저장해 두면 편합니다.
+`.env.example`은 커밋 가능한 템플릿이고, `.env`는 실제 실행용 로컬 설정입니다. CLI에서 provider를 선택할 때 API 키를 직접 입력할 수도 있지만, 반복 사용한다면 `.env`에 저장해 두면 편합니다.
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
@@ -219,7 +219,7 @@ llm = create_llm("claude", api_key="sk-ant-...")
 # OpenAI (기본: gpt-4o)
 llm = create_llm("openai", model="gpt-4o-mini")
 
-# Google Gemini (기본: gemini-1.5-flash)
+# Google Gemini (기본: gemini-2.5-flash-lite)
 llm = create_llm("google")
 
 # Ollama 로컬 (기본: llama3.2)
@@ -241,7 +241,7 @@ llm = create_llm("openrouter", model="meta-llama/llama-3.1-8b-instruct")
 |----------|--------|----------|
 | `claude` | `ClaudeLLM` | `claude-sonnet-4-6` |
 | `openai` | `OpenAILLM` | `gpt-4o` |
-| `google` | `GoogleLLM` | `gemini-1.5-flash` |
+| `google` | `GoogleLLM` | `gemini-2.5-flash-lite` |
 | `ollama` | `OllamaLLM` | `llama3.2` |
 | `openrouter` | `OpenRouterLLM` | `anthropic/claude-sonnet-4-6` |
 
@@ -488,6 +488,8 @@ OLLAMA_BASE_URL=http://localhost:11434    # Ollama 서버 주소
 
 API 키 설정 우선순위는 코드에서 직접 넘긴 인자, 환경변수 또는 `.env`, CLI에서 직접 입력한 값 순입니다. CLI에서 입력한 API 키는 현재 실행에만 사용됩니다.
 
+`.env.example`에는 실제 키를 넣지 말고 placeholder만 남겨 두세요. 실제 키는 `.env`에만 저장합니다.
+
 ### 코드에서 Config 사용
 
 ```python
@@ -499,6 +501,8 @@ config = Config.from_env()
 provider = config.get("llm_provider", "claude")   # 없으면 "claude"
 model    = config.get("llm_model")                # 없으면 None
 ```
+
+`Config.from_env()`는 환경변수와 `.env`를 읽기 위한 유틸리티입니다. CLI의 `.baseagent.json` 저장값은 `main.py`에서만 사용합니다.
 
 ---
 

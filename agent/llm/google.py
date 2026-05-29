@@ -12,7 +12,7 @@ _BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 class GoogleLLM(BaseLLM):
     """Google Gemini via direct HTTP (no SDK)."""
 
-    DEFAULT_MODEL = "gemini-1.5-flash"
+    DEFAULT_MODEL = "gemini-2.5-flash-lite"
 
     def __init__(
         self,
