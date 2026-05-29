@@ -35,8 +35,9 @@ def build_tools() -> ToolRegistry:
 
 
 def main(provider: str = "claude") -> None:
-    print(f"\n=== Tool Use Demo — provider: {provider} ===\n")
-    llm = create_llm(provider)
+    model = os.environ.get("LLM_MODEL") or None
+    print(f"\n=== Tool Use Demo — provider: {provider}  model: {model or 'default'} ===\n")
+    llm = create_llm(provider, model=model)
     agent = Agent(
         llm=llm,
         system_prompt="You are a helpful assistant. Use the available tools when needed.",

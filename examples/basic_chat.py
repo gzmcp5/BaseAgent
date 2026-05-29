@@ -19,8 +19,9 @@ load_dotenv()
 
 
 def main(provider: str = "claude") -> None:
-    print(f"\n=== Basic Chat — provider: {provider} ===\n")
-    llm = create_llm(provider)
+    model = os.environ.get("LLM_MODEL") or None
+    print(f"\n=== Basic Chat — provider: {provider}  model: {model or 'default'} ===\n")
+    llm = create_llm(provider, model=model)
     agent = Agent(llm=llm, system_prompt="You are a concise, helpful assistant.")
 
     turns = [
