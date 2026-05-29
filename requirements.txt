@@ -1,0 +1,6 @@
+# Base Agent — Python 3.10+
+#
+# Core runtime: zero external dependencies (uses stdlib urllib only)
+#
+# Optional extras:
+# pyyaml>=6.0      # for Config.from_yaml()
