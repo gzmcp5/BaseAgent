@@ -19,8 +19,10 @@ class OllamaLLM(BaseLLM):
         self,
         model: str = DEFAULT_MODEL,
         base_url: Optional[str] = None,
+        retry_config: Optional["RetryConfig"] = None,
     ) -> None:
-        super().__init__(model)
+        from .retry import RetryConfig as _RC  # noqa: F401
+        super().__init__(model, retry_config=retry_config)
         raw = base_url or os.environ.get("OLLAMA_BASE_URL", _DEFAULT_BASE_URL)
         self.base_url = raw.rstrip("/")
 

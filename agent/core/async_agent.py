@@ -52,7 +52,7 @@ class AsyncAgent:
     async def run(self, user_input: str, **llm_kwargs: Any) -> str:
         """Run a single user turn asynchronously; returns the final response."""
         self.memory.add(Message(role=Role.USER, content=user_input))
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         for _ in range(self.max_tool_iterations):
             messages = self.memory.get_messages()
@@ -106,7 +106,7 @@ class AsyncAgent:
         messages = self.memory.get_messages()
         messages = self.hooks.run("before_llm_call", messages) or messages
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
 
         def _produce() -> None:
@@ -149,7 +149,7 @@ class AsyncAgent:
     # ------------------------------------------------------------------
 
     async def _execute_tool_async(self, tool_call: ToolCall) -> Any:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         tool_call = self.hooks.run("before_tool_execute", tool_call) or tool_call
 
@@ -165,5 +165,8 @@ class AsyncAgent:
             except Exception as exc:
                 result = f"Error executing '{tool_call.name}': {exc}"
 
-        result = self.hooks.run("after_tool_execute", tool_call, result)
+        # Use explicit None check — `or` would swallow falsy results like 0 or "".
+        _r = self.hooks.run("after_tool_execute", result, tool_call)
+        if _r is not None:
+            result = _r
         return result

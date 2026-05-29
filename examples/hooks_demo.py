@@ -34,8 +34,8 @@ def build_hooks() -> HookRegistry:
         print(f"  [hook] before_tool_execute — {tool_call.name}({tool_call.arguments})")
 
     @hooks.on("after_tool_execute")
-    def log_result(tool_call, result):
-        print(f"  [hook] after_tool_execute  — result={result!r}")
+    def log_result(result, tool_call):
+        print(f"  [hook] after_tool_execute  — {tool_call.name} → result={result!r}")
 
     return hooks
 

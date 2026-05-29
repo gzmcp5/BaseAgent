@@ -21,8 +21,10 @@ class ClaudeLLM(BaseLLM):
         model: str = DEFAULT_MODEL,
         api_key: Optional[str] = None,
         max_tokens: int = 4096,
+        retry_config: Optional["RetryConfig"] = None,
     ) -> None:
-        super().__init__(model)
+        from .retry import RetryConfig as _RC  # noqa: F401
+        super().__init__(model, retry_config=retry_config)
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
         self.max_tokens = max_tokens
 
