@@ -33,9 +33,10 @@ def build_tools() -> ToolRegistry:
     return tools
 
 
-async def main() -> None:
-    print("\n=== AsyncAgent Demo ===\n")
-    llm = create_llm("claude")
+async def main(provider: str = "claude") -> None:
+    model = os.environ.get("LLM_MODEL") or None
+    print(f"\n=== AsyncAgent Demo — provider: {provider}  model: {model or 'default'} ===\n")
+    llm = create_llm(provider, model=model)
     tools = build_tools()
 
     async with AsyncAgent(llm=llm, tools=tools, system_prompt="Use tools for city info.") as agent:
@@ -51,4 +52,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    _provider = sys.argv[1] if len(sys.argv) > 1 else "claude"
+    asyncio.run(main(_provider))

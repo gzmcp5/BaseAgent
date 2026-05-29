@@ -16,8 +16,9 @@ load_dotenv()
 
 
 def main(provider: str = "claude") -> None:
-    print(f"\n=== Streaming Demo — provider: {provider} ===\n")
-    llm = create_llm(provider)
+    model = os.environ.get("LLM_MODEL") or None
+    print(f"\n=== Streaming Demo — provider: {provider}  model: {model or 'default'} ===\n")
+    llm = create_llm(provider, model=model)
     agent = Agent(llm=llm, system_prompt="You are a helpful assistant.")
 
     prompt = "Write a three-sentence story about a robot learning to paint."

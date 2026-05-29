@@ -40,9 +40,10 @@ def build_hooks() -> HookRegistry:
     return hooks
 
 
-def main() -> None:
-    print("\n=== Hooks / Middleware Demo ===\n")
-    llm = create_llm("claude")
+def main(provider: str = "claude") -> None:
+    model = os.environ.get("LLM_MODEL") or None
+    print(f"\n=== Hooks / Middleware Demo — provider: {provider}  model: {model or 'default'} ===\n")
+    llm = create_llm(provider, model=model)
 
     tools = ToolRegistry()
 
@@ -63,4 +64,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    _provider = sys.argv[1] if len(sys.argv) > 1 else "claude"
+    main(_provider)
