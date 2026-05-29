@@ -1,7 +1,7 @@
 from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Callable, Optional
 
 from .hooks import HookRegistry
 from .memory import ConversationMemory
@@ -48,7 +48,7 @@ class AsyncAgent:
         self.memory = memory or ConversationMemory(system_prompt=system_prompt)
         self.hooks = hooks or HookRegistry()
         self.max_tool_iterations = max_tool_iterations
-        self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._max_workers = max_workers
 
     # ------------------------------------------------------------------
     # Public API
@@ -57,7 +57,6 @@ class AsyncAgent:
     async def run(self, user_input: str, **llm_kwargs: Any) -> str:
         """Run a single user turn asynchronously; returns the final response."""
         self.memory.add(Message(role=Role.USER, content=user_input))
-        loop = asyncio.get_running_loop()
 
         for _ in range(self.max_tool_iterations):
             messages = self.memory.get_messages()
@@ -67,8 +66,7 @@ class AsyncAgent:
             if _m is not None:
                 messages = _m
 
-            response = await loop.run_in_executor(
-                self._executor,
+            response = await self._run_blocking(
                 lambda msgs=messages, sc=schemas: self.llm.chat(msgs, tools=sc, **llm_kwargs),
             )
 
@@ -133,7 +131,7 @@ class AsyncAgent:
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, None)  # sentinel
 
-        fut = loop.run_in_executor(self._executor, _produce)
+        fut = asyncio.create_task(self._run_blocking(_produce))
 
         full_response = ""
         while True:
@@ -155,7 +153,7 @@ class AsyncAgent:
         self.memory.clear()
 
     def close(self) -> None:
-        self._executor.shutdown(wait=False)
+        pass
 
     # ------------------------------------------------------------------
     # Async context manager
@@ -172,8 +170,6 @@ class AsyncAgent:
     # ------------------------------------------------------------------
 
     async def _execute_tool_async(self, tool_call: ToolCall) -> Any:
-        loop = asyncio.get_running_loop()
-
         tool_call = self.hooks.run("before_tool_execute", tool_call) or tool_call
 
         tool = self.tools.get(tool_call.name)
@@ -181,8 +177,7 @@ class AsyncAgent:
             result: Any = f"Error: tool '{tool_call.name}' is not registered."
         else:
             try:
-                result = await loop.run_in_executor(
-                    self._executor,
+                result = await self._run_blocking(
                     lambda tc=tool_call: tool.execute(**tc.arguments),
                 )
             except Exception as exc:
@@ -193,3 +188,11 @@ class AsyncAgent:
         if _r is not None:
             result = _r
         return result
+
+    async def _run_blocking(self, fn: Callable[[], Any]) -> Any:
+        loop = asyncio.get_running_loop()
+        executor = ThreadPoolExecutor(max_workers=self._max_workers)
+        try:
+            return await loop.run_in_executor(executor, fn)
+        finally:
+            executor.shutdown(wait=True)

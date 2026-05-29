@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 .env
+.baseagent.json
 *.egg-info/
 dist/
 build/

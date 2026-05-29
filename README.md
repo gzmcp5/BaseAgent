@@ -63,15 +63,19 @@ pip install pyyaml
 git clone <repo-url>
 cd BaseAgent
 cp .env.example .env
-# .env 파일에 API 키 입력
+# 선택: .env 파일에 API 키 입력
 ```
 
-### 2. `.env` 파일 편집
+### 2. `.env` 파일 편집 (선택)
+
+CLI에서 provider를 선택할 때 API 키를 직접 입력할 수도 있습니다. 반복 사용한다면 `.env`에 저장해 두면 편합니다.
 
 ```bash
-LLM_PROVIDER=claude          # claude | openai | google | ollama | openrouter
-LLM_MODEL=                   # 비워두면 각 제공자 기본값 사용
 ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
+GOOGLE_API_KEY=...
+OPENROUTER_API_KEY=sk-or-...
+OLLAMA_BASE_URL=http://localhost:11434
 ```
 
 ### 3. 대화형 CLI 실행
@@ -84,9 +88,21 @@ python main.py
 Base Agent  |  provider=claude  model=claude-sonnet-4-6
 Commands: /reset  /provider  /quit
 
-You: 안녕하세요!
+> 안녕하세요!
 Agent: 안녕하세요! 무엇을 도와드릴까요?
 ```
+
+`/`를 입력하면 커맨드 후보가 표시됩니다. 글자를 계속 입력해 후보를 필터링하고, 방향키와 Enter로 선택할 수 있습니다.
+
+| 커맨드 | 설명 |
+|--------|------|
+| `/provider` | provider와 model을 방향키로 선택합니다. API 키가 필요하고 환경변수에 없으면 직접 입력받습니다. |
+| `/reset` | 대화 히스토리를 초기화합니다. |
+| `/quit` | CLI를 종료합니다. |
+
+`/provider`에서 선택한 provider/model은 `.baseagent.json`에 저장되어 다음 실행에도 유지됩니다. API 키는 저장하지 않습니다. `LLM_PROVIDER` 또는 `LLM_MODEL` 환경변수를 지정하면 저장된 값보다 우선합니다.
+
+Ollama를 선택하면 로컬 Ollama 서버의 `/api/tags`에서 설치된 모델 목록을 가져와 선택할 수 있습니다. Ollama가 실행 중이 아니거나 모델 목록을 가져오지 못하면 모델명을 직접 입력합니다.
 
 ### 4. 코드에서 직접 사용
 
@@ -140,6 +156,7 @@ BaseAgent/
 │   └── test_retry.py
 ├── main.py                   # CLI 진입점
 ├── .env.example
+├── .baseagent.json           # CLI provider/model 저장 파일 (gitignore)
 └── SECURITY_FEATURE.md       # 추후 구현 예정 보안 기능 명세
 ```
 
@@ -437,18 +454,39 @@ llm = create_llm("claude", retry_config=retry)
 
 ## 설정
 
+### CLI 저장 설정
+
+`python main.py`에서 `/provider`로 선택한 provider/model은 프로젝트 루트의 `.baseagent.json`에 저장됩니다.
+
+```json
+{
+  "provider": "ollama",
+  "model": "llama3.2"
+}
+```
+
+이 파일은 로컬 실행 상태이므로 `.gitignore`에 포함되어 있습니다. API 키는 저장하지 않습니다.
+
+설정 우선순위:
+
+1. 셸 환경변수 또는 `.env`: `LLM_PROVIDER`, `LLM_MODEL`
+2. CLI 저장값: `.baseagent.json`
+3. 코드 기본값: `claude`, provider별 기본 모델
+
 ### 환경변수
 
 ```bash
 # .env 파일 또는 셸 환경변수
-LLM_PROVIDER=claude                       # 기본 제공자
-LLM_MODEL=claude-sonnet-4-6              # 기본 모델 (비워두면 제공자 기본값)
+LLM_PROVIDER=claude                       # 저장된 provider보다 우선
+LLM_MODEL=claude-sonnet-4-6              # 저장된 model보다 우선
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 GOOGLE_API_KEY=...
 OPENROUTER_API_KEY=sk-or-...
 OLLAMA_BASE_URL=http://localhost:11434    # Ollama 서버 주소
 ```
+
+API 키 설정 우선순위는 코드에서 직접 넘긴 인자, 환경변수 또는 `.env`, CLI에서 직접 입력한 값 순입니다. CLI에서 입력한 API 키는 현재 실행에만 사용됩니다.
 
 ### 코드에서 Config 사용
 
@@ -502,7 +540,7 @@ python tests/test_context.py
 python tests/test_async_agent.py
 
 # 전체 실행
-for f in tests/test_*.py; do python "$f"; done
+python -m unittest discover -v
 ```
 
 | 테스트 파일 | 테스트 수 | 검증 내용 |
