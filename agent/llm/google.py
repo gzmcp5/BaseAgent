@@ -50,7 +50,40 @@ class GoogleLLM(BaseLLM):
         return self._parse_response(data)
 
     def stream(self, messages: list[Message], **kwargs: Any) -> Iterator[str]:
-        raise NotImplementedError("Streaming not yet implemented")
+        """Stream text chunks via Gemini SSE (streamGenerateContent)."""
+        import json as _json
+
+        system_prompt, contents = self._format_messages(messages)
+        payload: dict[str, Any] = {
+            "contents": contents,
+            "generationConfig": {
+                "maxOutputTokens": kwargs.get("max_tokens", self.max_tokens)
+            },
+        }
+        if system_prompt:
+            payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+
+        url = (
+            f"{_BASE_URL}/{self.model}:streamGenerateContent"
+            f"?alt=sse&key={self.api_key}"
+        )
+        headers = {"Content-Type": "application/json"}
+        for data_str in self._stream_sse(url, payload, headers):
+            if not data_str:
+                continue
+            try:
+                chunk = _json.loads(data_str)
+            except _json.JSONDecodeError:
+                continue
+            parts = (
+                chunk.get("candidates", [{}])[0]
+                .get("content", {})
+                .get("parts", [])
+            )
+            for part in parts:
+                text = part.get("text", "")
+                if text:
+                    yield text
 
     # ------------------------------------------------------------------
 

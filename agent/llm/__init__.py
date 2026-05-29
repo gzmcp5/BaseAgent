@@ -7,6 +7,7 @@ from .google import GoogleLLM
 from .ollama import OllamaLLM
 from .openai_llm import OpenAILLM
 from .openrouter import OpenRouterLLM
+from .retry import RetryConfig, DEFAULT_RETRY
 
 _PROVIDERS: dict[str, type[BaseLLM]] = {
     "claude": ClaudeLLM,
@@ -43,9 +44,11 @@ def create_llm(
 __all__ = [
     "BaseLLM",
     "ClaudeLLM",
+    "DEFAULT_RETRY",
     "GoogleLLM",
     "OllamaLLM",
     "OpenAILLM",
     "OpenRouterLLM",
+    "RetryConfig",
     "create_llm",
 ]
