@@ -180,5 +180,65 @@ class TestAgent(unittest.TestCase):
         self.assertIn("Max tool iterations", result)
 
 
+class TestToolSchema(unittest.TestCase):
+    """Verify _hint_to_json_type handles generic and Optional annotations."""
+
+    def test_generic_list_type(self) -> None:
+        from typing import List
+        reg = ToolRegistry()
+
+        @reg.register(description="Accepts a list of strings.")
+        def f(items: List[str]) -> str:
+            return ",".join(items)
+
+        schema = reg.get_schemas()[0]
+        self.assertEqual(schema["parameters"]["properties"]["items"]["type"], "array")
+
+    def test_optional_type(self) -> None:
+        from typing import Optional as Opt
+        reg = ToolRegistry()
+
+        @reg.register(description="Optional int param.")
+        def f(x: Opt[int] = None) -> int:
+            return x or 0
+
+        schema = reg.get_schemas()[0]
+        # Optional[int] → "integer"
+        self.assertEqual(schema["parameters"]["properties"]["x"]["type"], "integer")
+        # Has default → not required
+        self.assertNotIn("x", schema["parameters"]["required"])
+
+    def test_bare_list_and_dict(self) -> None:
+        reg = ToolRegistry()
+
+        @reg.register(description="Bare list and dict.")
+        def f(items: list, mapping: dict) -> None:
+            pass
+
+        props = reg.get_schemas()[0]["parameters"]["properties"]
+        self.assertEqual(props["items"]["type"], "array")
+        self.assertEqual(props["mapping"]["type"], "object")
+
+    def test_tool_call_cycle_correct_result_in_memory(self) -> None:
+        """Verify the tool result (not the ToolCall object) is stored in memory."""
+        llm = MockLLM([
+            LLMResponse(
+                content="",
+                tool_calls=[ToolCall(id="1", name="zero", arguments={})],
+            ),
+            LLMResponse(content="done"),
+        ])
+        tools = ToolRegistry()
+
+        @tools.register(description="Returns zero.")
+        def zero() -> int:
+            return 0
+
+        agent = Agent(llm=llm, tools=tools)
+        agent.run("go")
+        tool_msg = next(m for m in agent.memory.messages if m.role == Role.TOOL)
+        self.assertEqual(tool_msg.content, "0")  # not str(ToolCall(...))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -23,7 +23,6 @@ class ClaudeLLM(BaseLLM):
         max_tokens: int = 4096,
         retry_config: Optional["RetryConfig"] = None,
     ) -> None:
-        from .retry import RetryConfig as _RC  # noqa: F401
         super().__init__(model, retry_config=retry_config)
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
         self.max_tokens = max_tokens
@@ -152,7 +151,7 @@ class ClaudeLLM(BaseLLM):
         tool_calls: list[ToolCall] = []
         for block in data.get("content", []):
             if block["type"] == "text":
-                content = block["text"]
+                content += block["text"]
             elif block["type"] == "tool_use":
                 tool_calls.append(
                     ToolCall(

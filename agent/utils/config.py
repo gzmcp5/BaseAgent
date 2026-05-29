@@ -53,10 +53,10 @@ class Config:
         return self._data.get(key, default)
 
     def __getattr__(self, key: str) -> Any:
-        try:
-            return self._data[key]
-        except KeyError:
-            return None
+        # Let Python handle dunder attributes normally so pickle/copy work correctly.
+        if key.startswith("__"):
+            raise AttributeError(key)
+        return self._data.get(key)
 
     def __repr__(self) -> str:
         safe = {k: "***" if "key" in k.lower() else v for k, v in self._data.items()}

@@ -22,7 +22,6 @@ class OpenAILLM(BaseLLM):
         max_tokens: int = 4096,
         retry_config: Optional["RetryConfig"] = None,
     ) -> None:
-        from .retry import RetryConfig as _RC  # noqa: F401
         super().__init__(model, retry_config=retry_config)
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         self.base_url = base_url or _DEFAULT_BASE_URL

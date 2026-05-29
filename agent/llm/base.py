@@ -65,6 +65,8 @@ class BaseLLM(ABC):
         except urllib.error.HTTPError as exc:
             body_text = exc.read().decode(errors="replace")
             raise RuntimeError(f"HTTP {exc.code} from {url}: {body_text}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Network error connecting to {url}: {exc.reason}") from exc
 
     @staticmethod
     def _stream_sse(url: str, payload: dict, headers: dict) -> Iterator[str]:

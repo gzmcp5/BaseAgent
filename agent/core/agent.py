@@ -34,13 +34,15 @@ class Agent:
             messages = self.memory.get_messages()
             schemas = self.tools.get_schemas() or None
 
-            # Middleware: may rewrite or inspect messages before the LLM call
-            messages = self.hooks.run("before_llm_call", messages) or messages
+            _m = self.hooks.run("before_llm_call", messages)
+            if _m is not None:
+                messages = _m
 
             response = self.llm.chat(messages, tools=schemas, **llm_kwargs)
 
-            # Middleware: may rewrite the LLM response
-            response = self.hooks.run("after_llm_response", response) or response
+            _resp = self.hooks.run("after_llm_response", response)
+            if _resp is not None:
+                response = _resp
 
             if not response.tool_calls:
                 self.memory.add(Message(role=Role.ASSISTANT, content=response.content))
@@ -75,7 +77,9 @@ class Agent:
         """
         self.memory.add(Message(role=Role.USER, content=user_input))
         messages = self.memory.get_messages()
-        messages = self.hooks.run("before_llm_call", messages) or messages
+        _m = self.hooks.run("before_llm_call", messages)
+        if _m is not None:
+            messages = _m
 
         full_response = ""
         for chunk in self.llm.stream(messages, **llm_kwargs):

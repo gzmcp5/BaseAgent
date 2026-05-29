@@ -58,14 +58,18 @@ class AsyncAgent:
             messages = self.memory.get_messages()
             schemas = self.tools.get_schemas() or None
 
-            messages = self.hooks.run("before_llm_call", messages) or messages
+            _m = self.hooks.run("before_llm_call", messages)
+            if _m is not None:
+                messages = _m
 
             response = await loop.run_in_executor(
                 self._executor,
                 lambda msgs=messages, sc=schemas: self.llm.chat(msgs, tools=sc, **llm_kwargs),
             )
 
-            response = self.hooks.run("after_llm_response", response) or response
+            _resp = self.hooks.run("after_llm_response", response)
+            if _resp is not None:
+                response = _resp
 
             if not response.tool_calls:
                 self.memory.add(Message(role=Role.ASSISTANT, content=response.content))
@@ -101,22 +105,29 @@ class AsyncAgent:
 
         Yields each text chunk as it arrives.  Tool calls are not supported
         in streaming mode — use run() for tool-enabled turns.
+        Raises any exception thrown by the LLM provider during streaming.
+        Memory is only updated on clean completion (no partial saves on error).
         """
         self.memory.add(Message(role=Role.USER, content=user_input))
         messages = self.memory.get_messages()
-        messages = self.hooks.run("before_llm_call", messages) or messages
+        _m = self.hooks.run("before_llm_call", messages)
+        if _m is not None:
+            messages = _m
 
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
+        exc_box: list[BaseException] = []
 
         def _produce() -> None:
             try:
                 for chunk in self.llm.stream(messages, **llm_kwargs):
                     loop.call_soon_threadsafe(queue.put_nowait, chunk)
+            except Exception as exc:
+                exc_box.append(exc)
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, None)  # sentinel
 
-        loop.run_in_executor(self._executor, _produce)
+        fut = loop.run_in_executor(self._executor, _produce)
 
         full_response = ""
         while True:
@@ -126,6 +137,12 @@ class AsyncAgent:
             full_response += chunk
             yield chunk
 
+        await fut  # ensure thread has exited; propagates executor-level errors
+
+        if exc_box:
+            raise exc_box[0]  # surface any LLM stream error
+
+        # Only commit to memory on clean completion
         self.memory.add(Message(role=Role.ASSISTANT, content=full_response))
 
     def reset(self) -> None:
