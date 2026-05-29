@@ -13,7 +13,6 @@ class ConversationMemory:
     def add(self, message: Message) -> None:
         self.messages.append(message)
         if len(self.messages) > self.max_messages:
-            # Keep the most recent messages; preserve leading assistant context if needed
             self.messages = self.messages[-self.max_messages :]
 
     def get_messages(self) -> list[Message]:

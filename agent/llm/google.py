@@ -21,7 +21,6 @@ class GoogleLLM(BaseLLM):
         max_tokens: int = 4096,
         retry_config: Optional["RetryConfig"] = None,
     ) -> None:
-        from .retry import RetryConfig as _RC  # noqa: F401
         super().__init__(model, retry_config=retry_config)
         self.api_key = api_key or os.environ.get("GOOGLE_API_KEY", "")
         self.max_tokens = max_tokens
@@ -142,7 +141,7 @@ class GoogleLLM(BaseLLM):
         tool_calls: list[ToolCall] = []
         for part in parts:
             if "text" in part:
-                content = part["text"]
+                content += part["text"]
             elif "functionCall" in part:
                 fc = part["functionCall"]
                 tool_calls.append(

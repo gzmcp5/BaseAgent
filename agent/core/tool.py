@@ -1,10 +1,11 @@
 from __future__ import annotations
 import functools
 import inspect
+import typing
 from typing import Any, Callable, Optional
 
 
-_TYPE_MAP: dict[type, str] = {
+_TYPE_MAP: dict[Any, str] = {
     str: "string",
     int: "integer",
     float: "number",
@@ -12,6 +13,34 @@ _TYPE_MAP: dict[type, str] = {
     list: "array",
     dict: "object",
 }
+
+
+def _hint_to_json_type(hint: Any) -> str:
+    """Convert a Python type annotation to a JSON Schema type string.
+
+    Handles bare builtins, generic aliases (list[str], dict[str, Any]),
+    and Optional[X] / Union[X, None].
+    """
+    # Direct match first
+    if hint in _TYPE_MAP:
+        return _TYPE_MAP[hint]
+
+    origin = typing.get_origin(hint)
+    if origin is not None:
+        # Optional[X] == Union[X, None]
+        if origin is typing.Union:
+            non_none = [a for a in typing.get_args(hint) if a is not type(None)]
+            if non_none:
+                return _hint_to_json_type(non_none[0])
+            return "string"
+        # list[X], List[X]
+        if origin in (list,):
+            return "array"
+        # dict[K, V], Dict[K, V]
+        if origin in (dict,):
+            return "object"
+
+    return "string"  # safe default for unrecognised types
 
 
 class Tool:
@@ -68,7 +97,7 @@ class ToolRegistry:
 
     def _build_parameters(self, func: Callable) -> dict[str, Any]:
         sig = inspect.signature(func)
-        hints = func.__annotations__
+        hints = typing.get_type_hints(func)  # resolves string annotations
         properties: dict[str, Any] = {}
         required: list[str] = []
 
@@ -76,7 +105,7 @@ class ToolRegistry:
             if param_name == "self":
                 continue
             hint = hints.get(param_name, str)
-            json_type = _TYPE_MAP.get(hint, "string")
+            json_type = _hint_to_json_type(hint)
             properties[param_name] = {"type": json_type}
             if param.default is inspect.Parameter.empty:
                 required.append(param_name)

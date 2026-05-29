@@ -26,7 +26,10 @@ class RetryConfig:
         return delay
 
     def is_retryable(self, error_message: str) -> bool:
-        return any(f"HTTP {code}" in error_message for code in self.retryable_codes)
+        if any(f"HTTP {code}" in error_message for code in self.retryable_codes):
+            return True
+        # Transient network errors (DNS failure, connection refused, timeout)
+        return "Network error" in error_message
 
 
 # Shared default — providers use this unless overridden
