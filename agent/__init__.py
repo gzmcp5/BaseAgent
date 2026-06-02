@@ -4,6 +4,7 @@ from .core.context import ContextManager
 from .core.hooks import HookRegistry
 from .core.memory import ConversationMemory
 from .core.message import LLMResponse, Message, Role, ToolCall
+from .core.persistent_memory import PersistentMemory
 from .core.tool import Tool, ToolRegistry
 from .llm import (
     BaseLLM,
@@ -25,6 +26,7 @@ __all__ = [
     "Config",
     "ContextManager",
     "ConversationMemory",
+    "PersistentMemory",
     "GoogleLLM",
     "HookRegistry",
     "LLMResponse",

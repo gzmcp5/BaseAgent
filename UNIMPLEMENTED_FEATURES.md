@@ -6,9 +6,6 @@
 
 ## 1. 메모리 및 데이터 영속성 (Memory & Persistence)
 
-* **장기 대화 메모리 (Long-term Memory)**
-  * **설명**: 현재는 대화 기록이 메모리(RAM) 상의 `ConversationMemory` 리스트에만 유지되므로 프로그램 종료 시 모든 대화 맥락이 유실됩니다.
-  * **해결 방안**: 대화 기록을 SQLite, PostgreSQL 또는 파일 기반 데이터베이스에 영구 저장하고 복원하는 기능이 필요합니다.
 * **메모리 압축 및 요약 (Memory Summarization)**
   * **설명**: 지정된 대화 한도(`max_messages`)를 초과하면 단순히 오래된 메시지부터 무조건 잘라내는(Truncation) 방식입니다.
   * **해결 방안**: 중요 정보를 잃지 않도록 과거 대화를 주기적으로 요약(Summarization)하여 하나의 압축 컨텍스트로 보존하는 로직이 요구됩니다.

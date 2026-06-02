@@ -19,6 +19,7 @@ Python으로 작성된 멀티 LLM 제공자 지원 AI 에이전트 베이스 프
   - [Streaming](#streaming)
   - [AsyncAgent](#asyncagent)
   - [Context 관리](#context-관리)
+  - [PersistentMemory](#persistentmemory)
   - [Retry / Rate Limit](#retry--rate-limit)
 - [설정](#설정)
 - [예제 실행](#예제-실행)
@@ -38,6 +39,7 @@ Python으로 작성된 멀티 LLM 제공자 지원 AI 에이전트 베이스 프
 | **스트리밍** | SSE(Claude·OpenAI·Google·OpenRouter), NDJSON(Ollama) |
 | **AsyncAgent** | asyncio + ThreadPoolExecutor, 동일 턴 툴들 동시 실행 |
 | **Context 관리** | 토큰 초과 시 자동 요약 압축, 커스텀 요약 함수 지원 |
+| **PersistentMemory** | SQLite 기반 영속 메모리 — 프로세스 재시작 후에도 대화 히스토리 유지, 세션 resume 지원 |
 | **Retry** | 지수 백오프 + 지터, HTTP 4xx/5xx 및 네트워크 오류 재시도 |
 | **Python 3.10+** | `|` union 문법, `typing.get_origin` 등 최신 기능 활용 |
 
@@ -130,6 +132,7 @@ BaseAgent/
 │   │   ├── hooks.py          # 미들웨어 훅 레지스트리
 │   │   ├── memory.py         # 대화 히스토리 관리
 │   │   ├── message.py        # Message, Role, ToolCall, LLMResponse 데이터클래스
+│   │   ├── persistent_memory.py  # SQLite 영속 메모리 (세션 resume 지원)
 │   │   └── tool.py           # Tool 등록 및 JSON Schema 생성
 │   ├── llm/
 │   │   ├── base.py           # 추상 BaseLLM + 공유 HTTP 유틸
@@ -143,16 +146,18 @@ BaseAgent/
 │       ├── config.py         # Config (환경변수 / YAML)
 │       └── env.py            # stdlib 기반 .env 로더
 ├── examples/
-│   ├── basic_chat.py         # 기본 멀티턴 대화
-│   ├── tool_use_demo.py      # 툴 호출 예제
-│   ├── streaming_demo.py     # 스트리밍 출력
-│   ├── hooks_demo.py         # 미들웨어 훅 예제
-│   └── async_demo.py         # 비동기 + 동시 툴 실행
+│   ├── basic_chat.py              # 기본 멀티턴 대화
+│   ├── tool_use_demo.py           # 툴 호출 예제
+│   ├── streaming_demo.py          # 스트리밍 출력
+│   ├── hooks_demo.py              # 미들웨어 훅 예제
+│   ├── async_demo.py              # 비동기 + 동시 툴 실행
+│   └── persistent_memory_demo.py  # SQLite 영속 메모리 (new/resume/list)
 ├── tests/
 │   ├── test_agent.py
 │   ├── test_async_agent.py
 │   ├── test_context.py
 │   ├── test_hooks.py
+│   ├── test_persistent_memory.py
 │   └── test_retry.py
 ├── main.py                   # CLI 진입점
 ├── .env.example
@@ -429,6 +434,50 @@ agent = Agent(llm=create_llm("claude"), memory=memory)
 
 ---
 
+### PersistentMemory
+
+`ConversationMemory`의 드롭인 교체제로, 대화 히스토리를 SQLite에 저장합니다.  
+프로세스를 종료한 뒤에도 세션 ID로 이전 대화를 재개할 수 있습니다.
+
+```python
+from agent import Agent, PersistentMemory, create_llm
+
+# 새 세션 생성
+with PersistentMemory("agent.db", system_prompt="You are helpful.") as mem:
+    agent = Agent(llm=create_llm("claude"), memory=mem)
+    agent.run("My name is Alex.")
+    print("Session ID:", mem.session_id)   # 저장해 두기
+
+# 나중에 — 세션 재개
+with PersistentMemory("agent.db", session_id="<저장한 session_id>") as mem:
+    print(f"{len(mem.messages)}개 메시지 복원됨")
+    agent = Agent(llm=create_llm("claude"), memory=mem)
+    agent.run("Do you remember my name?")  # 이전 대화를 기억
+
+# 전체 세션 목록 조회
+sessions = PersistentMemory.list_sessions("agent.db")
+for s in sessions:
+    print(s["id"], s["message_count"], s["updated_at"])
+```
+
+**`PersistentMemory` 생성자 파라미터:**
+
+| 파라미터 | 타입 | 기본값 | 설명 |
+|---------|------|--------|------|
+| `db_path` | `str` | `"agent_memory.db"` | SQLite DB 파일 경로 |
+| `session_id` | `str \| None` | `None` | 기존 세션 재개 시 지정 (없으면 신규 생성) |
+| `max_messages` | `int` | `100` | 인메모리 버퍼 최대 메시지 수 |
+| `system_prompt` | `str` | `""` | 신규 세션 시 사용할 시스템 프롬프트 |
+
+**동작 특성:**
+
+- `add()` 호출 시 SQLite에 즉시 기록 (WAL 모드)
+- `clear()`는 인메모리 버퍼만 비우며 DB 레코드는 보존
+- `delete_session()`으로 DB에서 세션과 메시지를 완전 삭제
+- 컨텍스트 매니저(`with` 구문) 사용 시 DB 연결 자동 정리
+
+---
+
 ### Retry / Rate Limit
 
 모든 HTTP 요청에 지수 백오프 재시도가 기본 적용됩니다.
@@ -521,6 +570,13 @@ python examples/basic_chat.py claude
 python examples/basic_chat.py openai
 ```
 
+```bash
+# SQLite 영속 메모리 데모
+python examples/persistent_memory_demo.py new             # 새 세션 시작
+python examples/persistent_memory_demo.py list            # 저장된 세션 목록
+python examples/persistent_memory_demo.py resume <id>    # 세션 재개
+```
+
 | 예제 파일 | 설명 |
 |----------|------|
 | `basic_chat.py` | 멀티턴 대화, 이전 질문 기억 확인 |
@@ -528,6 +584,7 @@ python examples/basic_chat.py openai
 | `streaming_demo.py` | 청크 단위 스트리밍 텍스트 출력 |
 | `hooks_demo.py` | 4개 훅 이벤트 로깅 및 툴 감사 |
 | `async_demo.py` | 두 툴 동시 실행 vs 순차 실행 시간 비교 |
+| `persistent_memory_demo.py` | SQLite 영속 메모리 new/resume/list 3가지 모드 |
 
 ---
 
@@ -542,6 +599,7 @@ python tests/test_hooks.py
 python tests/test_retry.py
 python tests/test_context.py
 python tests/test_async_agent.py
+python tests/test_persistent_memory.py
 
 # 전체 실행
 python -m unittest discover -v
@@ -554,7 +612,8 @@ python -m unittest discover -v
 | `test_retry.py` | 9 | 지수 백오프, 재시도 조건, 성공 복귀 |
 | `test_context.py` | 9 | 토큰 추정, 압축 트리거, 커스텀 요약 |
 | `test_async_agent.py` | 7 | 비동기 실행, 동시 툴, 스트리밍 메모리 |
-| **합계** | **52** | |
+| `test_persistent_memory.py` | 10 | 세션 생성/복원, 툴콜 직렬화, 세션 삭제, clear 격리 |
+| **합계** | **62** | |
 
 ---
 
