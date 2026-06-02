@@ -29,9 +29,8 @@
 
 ## 3. 다중 에이전트 및 오케스트레이션 (Multi-Agent & Orchestration)
 
-* **다중 에이전트 조율 (Multi-Agent Orchestration)**
-  * **설명**: 복잡한 비즈니스 프로세스(예: 기획자 에이전트가 문서를 쓰고, 코더 에이전트가 코딩을 하며, 테스터 에이전트가 테스트하는 등)를 조율하는 오케스트레이션 메커니즘이 없습니다.
-  * **해결 방안**: 에이전트 간 메시지 전달 구조(Agent-to-Agent Messaging), 라우터 에이전트(Router Agent), 감독관 에이전트(Supervisor Agent) 아키텍처 도입이 필요합니다.
+* ~~**다중 에이전트 조율 (Multi-Agent Orchestration)**~~ ✅ **구현 완료**
+  * `agent/core/multi_agent.py` — `OrchestratorAgent`(supervisor 위임) + `Pipeline`(순차 파이프라인)
 
 ---
 

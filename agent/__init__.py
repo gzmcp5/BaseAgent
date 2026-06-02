@@ -4,6 +4,7 @@ from .core.context import ContextManager
 from .core.hooks import HookRegistry
 from .core.memory import ConversationMemory
 from .core.message import LLMResponse, Message, Role, ToolCall
+from .core.multi_agent import OrchestratorAgent, Pipeline
 from .core.persistent_memory import PersistentMemory
 from .core.tool import Tool, ToolRegistry
 from .llm import (
@@ -34,6 +35,8 @@ __all__ = [
     "OllamaLLM",
     "OpenAILLM",
     "OpenRouterLLM",
+    "OrchestratorAgent",
+    "Pipeline",
     "RetryConfig",
     "Role",
     "Tool",

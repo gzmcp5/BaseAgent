@@ -20,6 +20,7 @@ Python으로 작성된 멀티 LLM 제공자 지원 AI 에이전트 베이스 프
   - [AsyncAgent](#asyncagent)
   - [Context 관리](#context-관리)
   - [PersistentMemory](#persistentmemory)
+  - [멀티에이전트](#멀티에이전트)
   - [Retry / Rate Limit](#retry--rate-limit)
 - [설정](#설정)
 - [예제 실행](#예제-실행)
@@ -39,6 +40,7 @@ Python으로 작성된 멀티 LLM 제공자 지원 AI 에이전트 베이스 프
 | **스트리밍** | SSE(Claude·OpenAI·Google·OpenRouter), NDJSON(Ollama) |
 | **AsyncAgent** | asyncio + ThreadPoolExecutor, 동일 턴 툴들 동시 실행 |
 | **Context 관리** | 토큰 초과 시 자동 요약 압축, 커스텀 요약 함수 지원 |
+| **멀티에이전트** | `OrchestratorAgent`(supervisor 위임) + `Pipeline`(순차 파이프라인) |
 | **PersistentMemory** | SQLite 기반 영속 메모리 — 프로세스 재시작 후에도 대화 히스토리 유지, 세션 resume 지원 |
 | **Retry** | 지수 백오프 + 지터, HTTP 4xx/5xx 및 네트워크 오류 재시도 |
 | **Python 3.10+** | `|` union 문법, `typing.get_origin` 등 최신 기능 활용 |
@@ -132,6 +134,7 @@ BaseAgent/
 │   │   ├── hooks.py          # 미들웨어 훅 레지스트리
 │   │   ├── memory.py         # 대화 히스토리 관리
 │   │   ├── message.py        # Message, Role, ToolCall, LLMResponse 데이터클래스
+│   │   ├── multi_agent.py    # OrchestratorAgent, Pipeline
 │   │   ├── persistent_memory.py  # SQLite 영속 메모리 (세션 resume 지원)
 │   │   └── tool.py           # Tool 등록 및 JSON Schema 생성
 │   ├── llm/
@@ -151,12 +154,15 @@ BaseAgent/
 │   ├── streaming_demo.py          # 스트리밍 출력
 │   ├── hooks_demo.py              # 미들웨어 훅 예제
 │   ├── async_demo.py              # 비동기 + 동시 툴 실행
-│   └── persistent_memory_demo.py  # SQLite 영속 메모리 (new/resume/list)
+│   ├── multi_agent_demo.py              # OrchestratorAgent + Pipeline 기본 데모
+│   ├── multi_agent_advanced_demo.py    # Pipeline + OrchestratorAgent 조합 심화 예제
+│   └── persistent_memory_demo.py       # SQLite 영속 메모리 (new/resume/list)
 ├── tests/
 │   ├── test_agent.py
 │   ├── test_async_agent.py
 │   ├── test_context.py
 │   ├── test_hooks.py
+│   ├── test_multi_agent.py
 │   ├── test_persistent_memory.py
 │   └── test_retry.py
 ├── main.py                   # CLI 진입점
@@ -478,6 +484,108 @@ for s in sessions:
 
 ---
 
+### 멀티에이전트
+
+두 가지 패턴을 제공합니다.
+
+#### OrchestratorAgent (Supervisor 패턴)
+
+각 서브에이전트를 `ask_{name}` 툴로 노출하고, 오케스트레이터 LLM이 어떤 서브에이전트를 어떤 순서로 호출할지 결정합니다.
+
+```python
+from agent import Agent, OrchestratorAgent, create_llm
+
+llm = create_llm("claude")
+
+researcher = Agent(
+    llm=create_llm("claude"),
+    system_prompt="You are a research assistant. Return 3 bullet-point facts.",
+)
+writer = Agent(
+    llm=create_llm("claude"),
+    system_prompt="You are a writer. Turn bullet points into a short paragraph.",
+)
+
+orchestrator = OrchestratorAgent(
+    llm=llm,
+    agents={"researcher": researcher, "writer": writer},
+    system_prompt=(
+        "Coordinate researcher and writer to answer questions. "
+        "First ask the researcher for facts, then ask the writer to "
+        "turn those facts into a paragraph, then return the result."
+    ),
+    max_iterations=20,   # 오케스트레이터 툴 루프 최대 횟수
+)
+
+result = orchestrator.run("What are large language models?")
+orchestrator.reset()   # 오케스트레이터 + 모든 서브에이전트 메모리 초기화
+```
+
+서브에이전트는 서로 독립적인 메모리를 유지합니다. 오케스트레이터가 `ask_researcher`를 여러 번 호출하면 researcher는 이전 답변을 기억합니다.
+
+#### Pipeline (순차 파이프라인)
+
+각 에이전트의 출력이 다음 에이전트의 입력이 됩니다.
+
+```python
+from agent import Agent, Pipeline, create_llm
+
+analyst  = Agent(llm=create_llm("claude"), system_prompt="List 3 key aspects.")
+writer   = Agent(llm=create_llm("claude"), system_prompt="Expand into a paragraph.")
+reviewer = Agent(llm=create_llm("claude"), system_prompt="Polish the paragraph.")
+
+pipeline = Pipeline(agents=[
+    ("analyst", analyst),    # 이름 지정 (선택)
+    ("writer", writer),
+    ("reviewer", reviewer),
+])
+
+result = pipeline.run("The impact of AI on software development")
+# analyst.run(input) → writer.run(analyst 출력) → reviewer.run(writer 출력)
+
+pipeline.reset()   # 모든 스테이지 메모리 초기화
+```
+
+#### Pipeline 안에 OrchestratorAgent 포함하기
+
+`Pipeline`의 스테이지에는 `run()`/`reset()` 메서드가 있는 객체라면 무엇이든 들어갈 수 있습니다.
+
+```python
+class OrchestratorStage(Agent):
+    """OrchestratorAgent를 Pipeline 스테이지로 래핑."""
+    def __init__(self, orch: OrchestratorAgent) -> None:
+        self._orch = orch
+    def run(self, user_input: str, **_) -> str:
+        return self._orch.run(user_input)
+    def reset(self) -> None:
+        self._orch.reset()
+
+review_orch = OrchestratorAgent(
+    llm=llm,
+    agents={"style": style_agent, "security": security_agent},
+    system_prompt="Coordinate style and security review, then give a verdict.",
+)
+
+pipeline = Pipeline(agents=[
+    ("coder",  coder_agent),
+    ("review", OrchestratorStage(review_orch)),   # 오케스트레이터를 스테이지로
+])
+
+result = pipeline.run("Write a function that removes list duplicates.")
+```
+
+**`OrchestratorAgent` 생성자 파라미터:**
+
+| 파라미터 | 타입 | 기본값 | 설명 |
+|---------|------|--------|------|
+| `llm` | `BaseLLM` | 필수 | 오케스트레이터 LLM |
+| `agents` | `dict[str, Agent]` | 필수 | 이름 → 서브에이전트 매핑 |
+| `system_prompt` | `str` | `""` | 오케스트레이터 시스템 프롬프트 |
+| `hooks` | `HookRegistry` | 빈 레지스트리 | 오케스트레이터에 적용할 미들웨어 |
+| `max_iterations` | `int` | `20` | 툴 루프 최대 반복 횟수 |
+
+---
+
 ### Retry / Rate Limit
 
 모든 HTTP 요청에 지수 백오프 재시도가 기본 적용됩니다.
@@ -571,6 +679,17 @@ python examples/basic_chat.py openai
 ```
 
 ```bash
+# 멀티에이전트 기본 데모
+python examples/multi_agent_demo.py                       # orchestrator + pipeline 둘 다
+python examples/multi_agent_demo.py orchestrator claude   # supervisor 패턴만
+python examples/multi_agent_demo.py pipeline openai       # 순차 파이프라인만
+
+# 멀티에이전트 심화 데모 (Pipeline → OrchestratorAgent 조합)
+python examples/multi_agent_advanced_demo.py              # 3가지 패턴 순서대로 실행
+python examples/multi_agent_advanced_demo.py openai
+```
+
+```bash
 # SQLite 영속 메모리 데모
 python examples/persistent_memory_demo.py new             # 새 세션 시작
 python examples/persistent_memory_demo.py list            # 저장된 세션 목록
@@ -584,6 +703,8 @@ python examples/persistent_memory_demo.py resume <id>    # 세션 재개
 | `streaming_demo.py` | 청크 단위 스트리밍 텍스트 출력 |
 | `hooks_demo.py` | 4개 훅 이벤트 로깅 및 툴 감사 |
 | `async_demo.py` | 두 툴 동시 실행 vs 순차 실행 시간 비교 |
+| `multi_agent_demo.py` | OrchestratorAgent(supervisor) + Pipeline(순차 파이프라인) |
+| `multi_agent_advanced_demo.py` | Pipeline → OrchestratorAgent 조합: 분석→코드→이중 리뷰 워크플로우 |
 | `persistent_memory_demo.py` | SQLite 영속 메모리 new/resume/list 3가지 모드 |
 
 ---
@@ -599,6 +720,7 @@ python tests/test_hooks.py
 python tests/test_retry.py
 python tests/test_context.py
 python tests/test_async_agent.py
+python tests/test_multi_agent.py
 python tests/test_persistent_memory.py
 
 # 전체 실행
@@ -612,8 +734,9 @@ python -m unittest discover -v
 | `test_retry.py` | 9 | 지수 백오프, 재시도 조건, 성공 복귀 |
 | `test_context.py` | 9 | 토큰 추정, 압축 트리거, 커스텀 요약 |
 | `test_async_agent.py` | 7 | 비동기 실행, 동시 툴, 스트리밍 메모리 |
+| `test_multi_agent.py` | 13 | OrchestratorAgent 위임/리셋, Pipeline 체이닝/이름/리셋 |
 | `test_persistent_memory.py` | 10 | 세션 생성/복원, 툴콜 직렬화, 세션 삭제, clear 격리 |
-| **합계** | **62** | |
+| **합계** | **75** | |
 
 ---
 
