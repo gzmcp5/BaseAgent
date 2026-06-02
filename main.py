@@ -472,8 +472,8 @@ def choose_provider(
 def main() -> None:
     restore_autocomplete = setup_autocomplete()
     saved_settings = load_saved_settings()
-    provider = os.environ.get("LLM_PROVIDER") or saved_settings.get("provider", "claude")
-    model = os.environ.get("LLM_MODEL") or saved_settings.get("model")
+    provider = saved_settings.get("provider") or os.environ.get("LLM_PROVIDER") or "claude"
+    model = saved_settings.get("model") or os.environ.get("LLM_MODEL")
 
     try:
         llm = create_llm(provider, model=model)
