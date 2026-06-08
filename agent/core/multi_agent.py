@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 from .agent import Agent
 from .hooks import HookRegistry
@@ -50,12 +50,20 @@ class OrchestratorAgent:
     @staticmethod
     def _build_tools(agents: dict[str, Agent]) -> ToolRegistry:
         registry = ToolRegistry()
-        for agent_name, agent in agents.items():
-            def _delegate(task: str, _a: Agent = agent) -> str:
-                return _a.run(task)
 
+        # Capture each sub-agent via an enclosing factory so the bound agent
+        # is NOT exposed as a tool parameter (a default-arg binding would leak
+        # into the generated JSON schema) while still avoiding the classic
+        # late-binding closure bug.
+        def make_delegate(bound: Agent) -> Callable[[str], str]:
+            def _delegate(task: str) -> str:
+                return bound.run(task)
+
+            return _delegate
+
+        for agent_name, agent in agents.items():
             registry.register(
-                _delegate,
+                make_delegate(agent),
                 name=f"ask_{agent_name}",
                 description=(
                     f"Delegate a task to the '{agent_name}' sub-agent "

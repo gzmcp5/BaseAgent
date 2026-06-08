@@ -50,11 +50,15 @@ class Tool:
         name: str,
         description: str,
         parameters: dict[str, Any],
+        requires_approval: bool = False,
     ) -> None:
         self.func = func
         self.name = name
         self.description = description
         self.parameters = parameters
+        # When True, the agent gates execution behind a human-in-the-loop
+        # approval callback (see Agent.approval_callback).
+        self.requires_approval = requires_approval
 
     def execute(self, **kwargs: Any) -> Any:
         return self.func(**kwargs)
@@ -79,20 +83,32 @@ class ToolRegistry:
         *,
         name: Optional[str] = None,
         description: Optional[str] = None,
+        requires_approval: bool = False,
     ) -> Any:
         """Register a function as a callable tool.
 
         Can be used as @registry.register or
         @registry.register(name="...", description="...").
+
+        Set ``requires_approval=True`` for sensitive tools (file deletion,
+        DB writes, …); the agent will then ask a human-in-the-loop callback
+        for confirmation before each execution.
         """
         if func is None:
-            return functools.partial(self.register, name=name, description=description)
+            return functools.partial(
+                self.register,
+                name=name,
+                description=description,
+                requires_approval=requires_approval,
+            )
 
         tool_name = name or func.__name__
         tool_desc = description or (func.__doc__ or "").strip()
         parameters = self._build_parameters(func)
 
-        self._tools[tool_name] = Tool(func, tool_name, tool_desc, parameters)
+        self._tools[tool_name] = Tool(
+            func, tool_name, tool_desc, parameters, requires_approval
+        )
         return func
 
     def _build_parameters(self, func: Callable) -> dict[str, Any]:
@@ -103,6 +119,13 @@ class ToolRegistry:
 
         for param_name, param in sig.parameters.items():
             if param_name == "self":
+                continue
+            # *args / **kwargs can't be expressed as named JSON Schema
+            # properties — skip them rather than emit bogus required fields.
+            if param.kind in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            ):
                 continue
             hint = hints.get(param_name, str)
             json_type = _hint_to_json_type(hint)

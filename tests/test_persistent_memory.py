@@ -69,6 +69,19 @@ class TestPersistentMemoryRestore(unittest.TestCase):
         with self.assertRaises(ValueError):
             PersistentMemory(self.db, session_id="nonexistent-id")
 
+    def test_invalid_session_does_not_leak_connection(self) -> None:
+        # __init__ opens the DB connection before validating the session_id;
+        # a failed load must close it rather than leak a SQLite handle.
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", ResourceWarning)
+            with self.assertRaises(ValueError):
+                PersistentMemory(self.db, session_id="nonexistent-id")
+            import gc
+
+            gc.collect()  # would raise ResourceWarning-as-error if leaked
+
     def test_tool_calls_roundtrip(self) -> None:
         mem = PersistentMemory(self.db)
         tc = ToolCall(id="call-1", name="get_weather", arguments={"city": "Seoul"})

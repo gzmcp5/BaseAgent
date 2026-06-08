@@ -64,14 +64,19 @@ class PersistentMemory(ConversationMemory):
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
-        self._init_schema()
-
-        if session_id:
-            self.session_id = session_id
-            self._load_session()
-        else:
-            self.session_id = str(uuid.uuid4())
-            self._create_session()
+        # If session setup fails (e.g. unknown session_id), close the
+        # already-open connection so we don't leak a SQLite handle.
+        try:
+            self._init_schema()
+            if session_id:
+                self.session_id = session_id
+                self._load_session()
+            else:
+                self.session_id = str(uuid.uuid4())
+                self._create_session()
+        except Exception:
+            self._conn.close()
+            raise
 
     # ------------------------------------------------------------------
     # Schema / session lifecycle

@@ -7,7 +7,11 @@ from .hooks import HookRegistry
 from .memory import ConversationMemory
 from .message import Message, Role, ToolCall
 from .tool import ToolRegistry
+from .tool_selector import ToolSelector
 from ..llm.base import BaseLLM
+
+# Human-in-the-loop approval callback: returns True to allow, False to deny.
+ApprovalCallback = Callable[[ToolCall], bool]
 
 
 class AsyncAgent:
@@ -42,6 +46,8 @@ class AsyncAgent:
         hooks: Optional[HookRegistry] = None,
         max_tool_iterations: int = 10,
         max_workers: int = 8,
+        tool_selector: Optional[ToolSelector] = None,
+        approval_callback: Optional[ApprovalCallback] = None,
     ) -> None:
         self.llm = llm
         self.tools = tools or ToolRegistry()
@@ -49,6 +55,10 @@ class AsyncAgent:
         self.hooks = hooks or HookRegistry()
         self.max_tool_iterations = max_tool_iterations
         self._max_workers = max_workers
+        # RAG-based tool pruning (optional).
+        self.tool_selector = tool_selector
+        # Human-in-the-loop gate for tools marked requires_approval (optional).
+        self.approval_callback = approval_callback
 
     # ------------------------------------------------------------------
     # Public API
@@ -60,7 +70,7 @@ class AsyncAgent:
 
         for _ in range(self.max_tool_iterations):
             messages = self.memory.get_messages()
-            schemas = self.tools.get_schemas() or None
+            schemas = self._schemas_for(user_input)
 
             _m = self.hooks.run("before_llm_call", messages)
             if _m is not None:
@@ -169,12 +179,28 @@ class AsyncAgent:
     # Internal
     # ------------------------------------------------------------------
 
+    def _schemas_for(self, user_input: str) -> Optional[list[dict]]:
+        """Tool schemas to advertise to the LLM (RAG-pruned when a selector is set)."""
+        if self.tool_selector is not None:
+            return self.tool_selector.select_schemas(user_input) or None
+        return self.tools.get_schemas() or None
+
+    def _approved(self, tool: Any, tool_call: ToolCall) -> bool:
+        """Human-in-the-loop gate (fail-closed) for requires_approval tools."""
+        if not tool.requires_approval:
+            return True
+        if self.approval_callback is None:
+            return False
+        return bool(self.approval_callback(tool_call))
+
     async def _execute_tool_async(self, tool_call: ToolCall) -> Any:
         tool_call = self.hooks.run("before_tool_execute", tool_call) or tool_call
 
         tool = self.tools.get(tool_call.name)
         if tool is None:
             result: Any = f"Error: tool '{tool_call.name}' is not registered."
+        elif not self._approved(tool, tool_call):
+            result = f"Tool '{tool_call.name}' execution was denied (awaiting user approval)."
         else:
             try:
                 result = await self._run_blocking(

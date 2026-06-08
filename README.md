@@ -15,16 +15,21 @@ Python으로 작성된 멀티 LLM 제공자 지원 AI 에이전트 베이스 프
   - [Agent](#agent)
   - [LLM 제공자](#llm-제공자)
   - [Tool 등록](#tool-등록)
+  - [RAG 도구 선택 (ToolSelector)](#rag-도구-선택-toolselector)
+  - [사용자 동의 (Human-in-the-loop)](#사용자-동의-human-in-the-loop)
   - [Middleware / Hooks](#middleware--hooks)
   - [Streaming](#streaming)
   - [AsyncAgent](#asyncagent)
   - [Context 관리](#context-관리)
+  - [SummarizingMemory](#summarizingmemory)
+  - [ProfileMemory](#profilememory)
   - [PersistentMemory](#persistentmemory)
   - [멀티에이전트](#멀티에이전트)
   - [Retry / Rate Limit](#retry--rate-limit)
 - [설정](#설정)
 - [예제 실행](#예제-실행)
 - [테스트](#테스트)
+- [프로젝트 검증](#프로젝트-검증)
 - [보안 기능 확장 계획](#보안-기능-확장-계획)
 
 ---
@@ -36,13 +41,18 @@ Python으로 작성된 멀티 LLM 제공자 지원 AI 에이전트 베이스 프
 | **외부 의존성 없음** | HTTP는 stdlib `urllib`만 사용 — `pip install` 불필요 |
 | **5개 LLM 제공자** | Claude, OpenAI, Google Gemini, Ollama(로컬), OpenRouter |
 | **Tool / Function Calling** | 데코레이터 기반 등록, JSON Schema 자동 생성, 제네릭 타입 지원 |
+| **RAG 도구 선택** | `ToolSelector` — TF-IDF 코사인 유사도로 쿼리에 관련된 상위 도구만 LLM에 전송(토큰 절감), 유니코드/한글 토큰화 |
+| **Human-in-the-loop** | `requires_approval` 도구는 실행 전 `approval_callback`으로 사용자 동의 확인(fail-closed) |
 | **Middleware Hooks** | LLM 호출 전후, 툴 실행 전후 4개 이벤트 인터셉트 |
 | **스트리밍** | SSE(Claude·OpenAI·Google·OpenRouter), NDJSON(Ollama) |
 | **AsyncAgent** | asyncio + ThreadPoolExecutor, 동일 턴 툴들 동시 실행 |
 | **Context 관리** | 토큰 초과 시 자동 요약 압축, 커스텀 요약 함수 지원 |
+| **SummarizingMemory** | 메시지 수 초과 시 오래된 대화를 LLM(또는 폴백)으로 요약해 SYSTEM 메시지로 보존 |
+| **ProfileMemory** | `UserProfile`(이름·선호도·facts)을 SYSTEM 메시지로 자동 주입 |
 | **멀티에이전트** | `OrchestratorAgent`(supervisor 위임) + `Pipeline`(순차 파이프라인) |
 | **PersistentMemory** | SQLite 기반 영속 메모리 — 프로세스 재시작 후에도 대화 히스토리 유지, 세션 resume 지원 |
 | **Retry** | 지수 백오프 + 지터, HTTP 4xx/5xx 및 네트워크 오류 재시도 |
+| **반복 검증 스킬** | `.claude/skills/verify-project` — 컴파일·임포트·랜덤순서 반복·경고강제·퍼즈 5축 검증 |
 | **Python 3.10+** | `|` union 문법, `typing.get_origin` 등 최신 기능 활용 |
 
 ---
@@ -133,10 +143,13 @@ BaseAgent/
 │   │   ├── context.py        # 토큰 예산 관리 + 자동 요약
 │   │   ├── hooks.py          # 미들웨어 훅 레지스트리
 │   │   ├── memory.py         # 대화 히스토리 관리
+│   │   ├── summarizing_memory.py # LLM 요약 기반 메모리 압축
+│   │   ├── user_profile.py   # UserProfile + ProfileMemory (사용자 컨텍스트 주입)
 │   │   ├── message.py        # Message, Role, ToolCall, LLMResponse 데이터클래스
 │   │   ├── multi_agent.py    # OrchestratorAgent, Pipeline
 │   │   ├── persistent_memory.py  # SQLite 영속 메모리 (세션 resume 지원)
-│   │   └── tool.py           # Tool 등록 및 JSON Schema 생성
+│   │   ├── tool.py           # Tool 등록 및 JSON Schema 생성 (requires_approval 지원)
+│   │   └── tool_selector.py  # RAG 기반 도구 선택 (TF-IDF 코사인)
 │   ├── llm/
 │   │   ├── base.py           # 추상 BaseLLM + 공유 HTTP 유틸
 │   │   ├── claude.py         # Anthropic Claude
@@ -164,10 +177,17 @@ BaseAgent/
 │   ├── test_hooks.py
 │   ├── test_multi_agent.py
 │   ├── test_persistent_memory.py
-│   └── test_retry.py
+│   ├── test_retry.py
+│   ├── test_summarizing_memory.py
+│   ├── test_user_profile.py
+│   ├── test_tool.py
+│   └── test_tool_selector.py
+├── .claude/  ( → .agent/ 심볼릭 링크)
+│   └── skills/verify-project/    # 전체 프로젝트 반복 검증 스킬 + 하네스
 ├── main.py                   # CLI 진입점
 ├── .env.example
 ├── .baseagent.json           # CLI provider/model 저장 파일 (gitignore)
+├── AGENTS.md  ( ← CLAUDE.md 심볼릭 링크)  # 에이전트/도구용 요약 문서
 └── SECURITY_FEATURE.md       # 추후 구현 예정 보안 기능 명세
 ```
 
@@ -211,9 +231,11 @@ agent.reset()
 | `llm` | `BaseLLM` | 필수 | LLM 인스턴스 |
 | `system_prompt` | `str` | `""` | 시스템 프롬프트 |
 | `tools` | `ToolRegistry` | 빈 레지스트리 | 등록된 툴 목록 |
-| `memory` | `ConversationMemory` | 자동 생성 | 대화 메모리 (`ContextManager`로 교체 가능) |
+| `memory` | `ConversationMemory` | 자동 생성 | 대화 메모리 (`ContextManager`/`SummarizingMemory`/`ProfileMemory`/`PersistentMemory`로 교체 가능) |
 | `hooks` | `HookRegistry` | 빈 레지스트리 | 미들웨어 훅 |
 | `max_tool_iterations` | `int` | `10` | 툴 루프 최대 반복 횟수 |
+| `tool_selector` | `ToolSelector \| None` | `None` | 설정 시 쿼리 관련 도구만 LLM에 전송 (RAG 가지치기) |
+| `approval_callback` | `Callable[[ToolCall], bool] \| None` | `None` | `requires_approval` 도구 실행 전 사용자 동의 게이트 |
 
 ---
 
@@ -295,7 +317,68 @@ def round_number(value: float, decimals: Optional[int] = None) -> float:
 | `dict`, `dict[K,V]` | `"object"` |
 | `Optional[X]` | X의 타입 (required 목록에서 제외) |
 
-기본값 없는 파라미터는 자동으로 `required`에 추가됩니다.
+기본값 없는 파라미터는 자동으로 `required`에 추가됩니다. `*args`/`**kwargs`는 스키마에서 제외됩니다(실행 시에는 그대로 전달).
+
+---
+
+### RAG 도구 선택 (ToolSelector)
+
+등록된 모든 도구 스키마를 매번 LLM에 전송하면 도구가 늘수록 입력 토큰과 비용이 증가합니다. `ToolSelector`는 도구 `name + description`을 TF-IDF 벡터로 만들어 사용자 쿼리와의 코사인 유사도로 랭킹하고, 상위 `top_k`개 스키마만 전송합니다. 외부 임베딩 라이브러리 없이 stdlib만 사용하며, 한글/유니코드 토큰화를 지원합니다.
+
+```python
+from agent import Agent, ToolRegistry, ToolSelector, create_llm
+
+tools = ToolRegistry()
+
+@tools.register(description="로컬 파일을 삭제합니다.")
+def delete_file(path: str) -> str: ...
+
+@tools.register(description="도시의 날씨 예보를 조회합니다.")
+def get_weather(city: str) -> str: ...
+
+selector = ToolSelector(tools, top_k=3)   # 같은 레지스트리로 생성
+agent = Agent(llm=create_llm("claude"), tools=tools, tool_selector=selector)
+
+# "파일 삭제해줘" 쿼리 → delete_file 스키마만 LLM에 전송
+agent.run("이 파일 삭제해줘")
+```
+
+**`ToolSelector` 생성자 파라미터:**
+
+| 파라미터 | 타입 | 기본값 | 설명 |
+|---------|------|--------|------|
+| `registry` | `ToolRegistry` | 필수 | 선택 대상 레지스트리 (에이전트 `tools`와 동일해야 실행 가능) |
+| `top_k` | `int` | `3` | 전송할 최대 도구 수 |
+| `min_score` | `float` | `0.0` | 이 점수(코사인 0~1) 이하 도구는 제외 |
+| `fallback_to_all` | `bool` | `True` | 매칭 도구가 없으면 전체 도구 반환(기능 보존) |
+| `scorer` | `Callable \| None` | TF-IDF | 커스텀 `(query, {name: text}) -> {name: score}` 스코어러 |
+
+`select(query)` / `select_schemas(query)` / `rank(query)`를 직접 호출할 수도 있습니다.
+
+---
+
+### 사용자 동의 (Human-in-the-loop)
+
+파일 삭제, DB 수정 등 민감한 도구는 실행 전에 사용자 동의를 받도록 게이트를 걸 수 있습니다. 도구를 `requires_approval=True`로 등록하고, 에이전트에 `approval_callback`을 전달합니다.
+
+```python
+from agent import Agent, ToolRegistry, create_llm
+
+tools = ToolRegistry()
+
+@tools.register(description="파일을 삭제합니다.", requires_approval=True)
+def delete_file(path: str) -> str:
+    import os; os.remove(path); return f"deleted {path}"
+
+def confirm(tool_call) -> bool:
+    answer = input(f"⚠️  {tool_call.name}({tool_call.arguments}) 실행할까요? [y/N] ")
+    return answer.strip().lower() == "y"
+
+agent = Agent(llm=create_llm("claude"), tools=tools, approval_callback=confirm)
+agent.run("temp.log 파일 삭제해줘")   # confirm()이 True를 반환해야 실제 실행
+```
+
+**동작(fail-closed):** `requires_approval` 도구는 콜백이 명시적으로 `True`를 반환해야 실행됩니다. 콜백이 없거나 `False`를 반환하면 실행되지 않고, LLM에는 거부 메시지가 결과로 전달됩니다. 일반 도구는 콜백과 무관하게 평소처럼 실행됩니다. 동기(`Agent`)·비동기(`AsyncAgent`) 모두 지원합니다.
 
 ---
 
@@ -437,6 +520,50 @@ agent = Agent(llm=create_llm("claude"), memory=memory)
 2. 초과 시 오래된 메시지들을 요약 메시지 1개로 압축
 3. 최근 `keep_recent`개 메시지는 항상 원문 유지
 4. `summarizer`가 없으면 plain-text 다이제스트로 대체
+
+---
+
+### SummarizingMemory
+
+메시지 개수(`max_messages`)를 초과하면 오래된 메시지를 요약해 SYSTEM 메시지로 보존하는 메모리입니다. `ContextManager`가 토큰 기준이라면, `SummarizingMemory`는 메시지 개수 기준이며 LLM 요약을 직접 사용합니다.
+
+```python
+from agent import Agent, SummarizingMemory, create_llm
+
+memory = SummarizingMemory(
+    max_messages=100,        # 초과 시 요약 트리거
+    summary_keep_last=20,    # 최근 20개는 원문 유지, 나머지를 요약
+    llm=create_llm("claude"),  # 생략 시 텍스트 폴백 요약
+    system_prompt="You are a helpful assistant.",
+)
+agent = Agent(llm=create_llm("claude"), memory=memory)
+```
+
+- 압축 시 `summary_keep_last`개를 제외한 오래된 메시지를 요약하여 누적
+- `llm`이 없으면 LLM 호출 없이 텍스트 다이제스트로 폴백(요약 실패 시에도 동일 폴백)
+- `get_messages()`는 시스템 프롬프트 → 요약 → 최근 메시지 순으로 반환
+
+---
+
+### ProfileMemory
+
+이름·선호도·사실(facts) 같은 사용자 정보를 `UserProfile`에 담아두면, 매 `get_messages()` 호출 시 SYSTEM 메시지로 자동 주입됩니다. 대화를 초기화해도 프로필은 보존됩니다.
+
+```python
+from agent import Agent, ProfileMemory, UserProfile, create_llm
+
+memory = ProfileMemory(system_prompt="You are a helpful assistant.")
+memory.profile.name = "Alice"
+memory.profile.add_fact("간결한 답변을 선호함")
+memory.profile.preferences["language"] = "Korean"
+
+agent = Agent(llm=create_llm("claude"), memory=memory)
+agent.run("내 이름 기억해?")   # 프로필이 컨텍스트로 주입됨
+
+agent.reset()                  # 대화는 비워지지만 프로필(Alice)은 유지
+```
+
+`UserProfile`은 `to_dict()`/`from_dict()`로 직렬화할 수 있고(내부 가변 객체를 복사해 누수 방지), `add_fact()`는 중복을 무시합니다. 별도로 만든 프로필을 `ProfileMemory(profile=...)`로 주입할 수도 있습니다.
 
 ---
 
@@ -715,28 +842,47 @@ python examples/persistent_memory_demo.py resume <id>    # 세션 재개
 
 ```bash
 # 개별 실행
-python tests/test_agent.py
-python tests/test_hooks.py
-python tests/test_retry.py
-python tests/test_context.py
-python tests/test_async_agent.py
-python tests/test_multi_agent.py
-python tests/test_persistent_memory.py
+python -m unittest tests.test_agent
+python -m unittest tests.test_tool_selector
 
 # 전체 실행
-python -m unittest discover -v
+python -m unittest discover -s tests -v
 ```
 
 | 테스트 파일 | 테스트 수 | 검증 내용 |
 |------------|---------|---------|
-| `test_agent.py` | 16 | 에이전트 루프, 툴 실행, 메모리, JSON Schema 타입 |
-| `test_hooks.py` | 11 | 훅 체인, falsy 결과 보존, 다중 훅 |
-| `test_retry.py` | 9 | 지수 백오프, 재시도 조건, 성공 복귀 |
+| `test_agent.py` | 24 | 에이전트 루프, 툴 실행, 메모리, JSON Schema 타입, 승인 게이트, 도구 선택 통합 |
+| `test_async_agent.py` | 11 | 비동기 실행, 동시 툴, 스트리밍 메모리, 승인/도구 선택 |
 | `test_context.py` | 9 | 토큰 추정, 압축 트리거, 커스텀 요약 |
-| `test_async_agent.py` | 7 | 비동기 실행, 동시 툴, 스트리밍 메모리 |
-| `test_multi_agent.py` | 13 | OrchestratorAgent 위임/리셋, Pipeline 체이닝/이름/리셋 |
-| `test_persistent_memory.py` | 10 | 세션 생성/복원, 툴콜 직렬화, 세션 삭제, clear 격리 |
-| **합계** | **75** | |
+| `test_hooks.py` | 11 | 훅 체인, falsy 결과 보존, 다중 훅 |
+| `test_multi_agent.py` | 15 | OrchestratorAgent 위임/리셋, Pipeline 체이닝/이름/리셋, 도구 스키마 누수 방지 |
+| `test_persistent_memory.py` | 11 | 세션 생성/복원, 툴콜 직렬화, 세션 삭제, clear 격리, 커넥션 누수 방지 |
+| `test_retry.py` | 9 | 지수 백오프, 재시도 조건, 성공 복귀 |
+| `test_summarizing_memory.py` | 18 | 요약 압축 트리거, LLM/폴백 요약, 누적, 엣지케이스 |
+| `test_tool.py` | 10 | 스키마 생성, `*args`/`**kwargs` 제외, `requires_approval` |
+| `test_tool_selector.py` | 16 | TF-IDF 랭킹, top_k/min_score, 폴백, 유니코드 토큰화 |
+| `test_user_profile.py` | 30 | 프로필 CRUD, 직렬화 누수 방지, ProfileMemory 주입 |
+| **합계** | **164** | |
+
+---
+
+## 프로젝트 검증
+
+전체 코드베이스를 반복적으로 검증하는 스킬이 `.claude/skills/verify-project/`에 포함되어 있습니다. 단일 테스트 1회 실행으로는 놓치기 쉬운 비결정성·테스트 간 상태 누수·리소스 누수·예외 안전성을 5축으로 점검합니다.
+
+```bash
+python .claude/skills/verify-project/scripts/verify.py
+```
+
+| 축 | 점검 내용 |
+|----|----------|
+| 1. 구문 컴파일 | 트리 전체 `py_compile` — 테스트가 아직 임포트하지 않은 파일의 syntax 오류 |
+| 2. 임포트 | 모든 모듈 임포트 — import-time 오류·순환 임포트·누락 심볼 |
+| 3. 반복 + 랜덤 순서 | 매번 다른 순서로 전체 스위트 반복 — flaky 테스트·테스트 간 상태 누수 |
+| 4. 경고 강제 | `ResourceWarning`/`DeprecationWarning`을 오류로 승격 — 미닫힌 DB/파일·deprecation |
+| 5. 퍼즈 | `ToolSelector`에 랜덤·유니코드 입력 — 예외 없음 + 불변식(점수 0~1, top_k, 레지스트리 존재) |
+
+종료 코드는 전체 통과 시에만 0이므로 CI 게이트로도 사용할 수 있습니다. 빠른 점검은 `--iterations 3 --fuzz-trials 500`, 자세한 점검은 기본값을 사용하세요.
 
 ---
 

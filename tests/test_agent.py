@@ -10,6 +10,7 @@ from agent.core.agent import Agent
 from agent.core.memory import ConversationMemory
 from agent.core.message import LLMResponse, Message, Role, ToolCall
 from agent.core.tool import ToolRegistry
+from agent.core.tool_selector import ToolSelector
 from agent.llm.base import BaseLLM
 
 
@@ -178,6 +179,135 @@ class TestAgent(unittest.TestCase):
         agent = Agent(llm=llm, max_tool_iterations=3)
         result = agent.run("Loop please")
         self.assertIn("Max tool iterations", result)
+
+
+class TestHumanInTheLoop(unittest.TestCase):
+    """Approval gating for tools marked requires_approval."""
+
+    def _agent_with_danger(self, approval_callback):
+        llm = MockLLM([
+            LLMResponse(
+                content="",
+                tool_calls=[ToolCall(id="1", name="rm", arguments={"path": "/x"})],
+            ),
+            LLMResponse(content="all done"),
+        ])
+        tools = ToolRegistry()
+
+        @tools.register(description="Delete a file.", requires_approval=True)
+        def rm(path: str) -> str:
+            return f"deleted {path}"
+
+        return Agent(llm=llm, tools=tools, approval_callback=approval_callback), tools
+
+    def test_approved_tool_executes(self) -> None:
+        agent, _ = self._agent_with_danger(approval_callback=lambda tc: True)
+        agent.run("delete it")
+        tool_msg = next(m for m in agent.memory.messages if m.role == Role.TOOL)
+        self.assertEqual(tool_msg.content, "deleted /x")
+
+    def test_denied_tool_is_blocked(self) -> None:
+        agent, _ = self._agent_with_danger(approval_callback=lambda tc: False)
+        agent.run("delete it")
+        tool_msg = next(m for m in agent.memory.messages if m.role == Role.TOOL)
+        self.assertIn("denied", tool_msg.content.lower())
+        self.assertNotIn("deleted", tool_msg.content)
+
+    def test_requires_approval_without_callback_is_fail_closed(self) -> None:
+        # No approval_callback configured → sensitive tool must NOT run.
+        agent, _ = self._agent_with_danger(approval_callback=None)
+        agent.run("delete it")
+        tool_msg = next(m for m in agent.memory.messages if m.role == Role.TOOL)
+        self.assertIn("denied", tool_msg.content.lower())
+
+    def test_callback_receives_tool_call(self) -> None:
+        seen = []
+        agent, _ = self._agent_with_danger(
+            approval_callback=lambda tc: seen.append(tc) or True
+        )
+        agent.run("delete it")
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0].name, "rm")
+        self.assertEqual(seen[0].arguments, {"path": "/x"})
+
+    def test_non_sensitive_tool_runs_without_callback(self) -> None:
+        llm = MockLLM([
+            LLMResponse(
+                content="",
+                tool_calls=[ToolCall(id="1", name="safe", arguments={})],
+            ),
+            LLMResponse(content="ok"),
+        ])
+        tools = ToolRegistry()
+
+        @tools.register(description="Safe op.")
+        def safe() -> str:
+            return "safe-result"
+
+        agent = Agent(llm=llm, tools=tools)  # no approval_callback
+        agent.run("go")
+        tool_msg = next(m for m in agent.memory.messages if m.role == Role.TOOL)
+        self.assertEqual(tool_msg.content, "safe-result")
+
+
+class TestToolSelectorIntegration(unittest.TestCase):
+    """Agent forwards only RAG-selected tool schemas to the LLM."""
+
+    class _CapturingLLM(BaseLLM):
+        def __init__(self, responses):
+            super().__init__("mock")
+            self._responses = list(responses)
+            self._i = 0
+            self.tools_seen = []
+
+        def chat(self, messages, tools=None, **kwargs):
+            self.tools_seen.append(tools)
+            r = self._responses[self._i] if self._i < len(self._responses) else LLMResponse(content="end")
+            self._i += 1
+            return r
+
+        def stream(self, messages, **kwargs):
+            raise NotImplementedError
+
+    def _registry(self) -> ToolRegistry:
+        reg = ToolRegistry()
+
+        @reg.register(description="Delete a file from disk.")
+        def delete_file(path: str) -> str:
+            return "deleted"
+
+        @reg.register(description="Add two integers together.")
+        def add_numbers(a: int, b: int) -> int:
+            return a + b
+
+        return reg
+
+    def test_only_relevant_schema_sent(self) -> None:
+        reg = self._registry()
+        llm = self._CapturingLLM([LLMResponse(content="done")])
+        agent = Agent(llm=llm, tools=reg, tool_selector=ToolSelector(reg, top_k=1))
+        agent.run("please delete the file")
+        sent = llm.tools_seen[0]
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["name"], "delete_file")
+
+    def test_without_selector_all_schemas_sent(self) -> None:
+        reg = self._registry()
+        llm = self._CapturingLLM([LLMResponse(content="done")])
+        agent = Agent(llm=llm, tools=reg)
+        agent.run("please delete the file")
+        self.assertEqual(len(llm.tools_seen[0]), 2)
+
+    def test_selected_tool_still_executes(self) -> None:
+        reg = self._registry()
+        llm = self._CapturingLLM([
+            LLMResponse(content="", tool_calls=[ToolCall(id="1", name="delete_file", arguments={"path": "/t"})]),
+            LLMResponse(content="done"),
+        ])
+        agent = Agent(llm=llm, tools=reg, tool_selector=ToolSelector(reg, top_k=1))
+        agent.run("delete the file")
+        tool_msg = next(m for m in agent.memory.messages if m.role == Role.TOOL)
+        self.assertEqual(tool_msg.content, "deleted")
 
 
 class TestToolSchema(unittest.TestCase):

@@ -227,5 +227,31 @@ class TestPipelineReset(unittest.TestCase):
             self.assertEqual(len(agent.memory.messages), 0)
 
 
+class TestOrchestratorSchema(unittest.TestCase):
+    """Regression: the bound sub-agent must not leak into the tool schema."""
+
+    def test_delegate_tool_exposes_only_task_param(self):
+        orch = OrchestratorAgent(
+            llm=_ScriptedLLM([LLMResponse(content="done")]),
+            agents={"researcher": _echo_agent()},
+        )
+        schemas = orch._inner.tools.get_schemas()
+        self.assertEqual(len(schemas), 1)
+        props = schemas[0]["parameters"]["properties"]
+        # Only 'task' must be exposed — no internal '_a'/'bound' binding leak.
+        self.assertEqual(list(props.keys()), ["task"])
+        self.assertEqual(schemas[0]["parameters"]["required"], ["task"])
+
+    def test_each_delegate_binds_its_own_agent(self):
+        # Guards against the late-binding closure bug: each tool must call
+        # its own sub-agent, not the last one in the loop.
+        orch = OrchestratorAgent(
+            llm=_ScriptedLLM([LLMResponse(content="ignored")]),
+            agents={"a": _echo_agent(prefix="A:"), "b": _echo_agent(prefix="B:")},
+        )
+        self.assertEqual(orch._inner.tools.get("ask_a").execute(task="q"), "A:q")
+        self.assertEqual(orch._inner.tools.get("ask_b").execute(task="q"), "B:q")
+
+
 if __name__ == "__main__":
     unittest.main()

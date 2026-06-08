@@ -8,3 +8,10 @@ dist/
 build/
 .venv/
 venv/
+
+# Workspace tooling: keep skills + symlink, ignore local/transient state
+.agent/worktrees/
+.agent/agent-memory/
+.agent/settings.local.json
+.agent/runtime/
+.agent/state/

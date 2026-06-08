@@ -1,6 +1,12 @@
 # Base Agent — Python 3.10+
 #
-# Core runtime: zero external dependencies (uses stdlib urllib only)
+# Core runtime: zero external dependencies.
+#   Everything ships on the Python standard library only —
+#   urllib (LLM HTTP), sqlite3 (PersistentMemory), asyncio + concurrent.futures
+#   (AsyncAgent), math/re/collections (ToolSelector TF-IDF), json, dataclasses, …
 #
-# Optional extras:
+# Tests: standard-library `unittest` (python -m unittest discover -s tests).
+#   No pytest or other test dependency required.
+#
+# Optional extras (install only if you use the matching feature):
 # pyyaml>=6.0      # for Config.from_yaml()
