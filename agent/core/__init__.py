@@ -1,3 +1,5 @@
+# core 하위 패키지의 공개 묶음.
+# 에이전트 본체·메모리 종류·도구·훅 등 핵심 구성요소를 한곳에서 import 할 수 있게 모은다.
 from .agent import Agent
 from .async_agent import AsyncAgent
 from .context import ContextManager

@@ -1,3 +1,7 @@
+# 패키지 공개 API 진입점.
+# 사용자가 `from agent import Agent, create_llm ...` 처럼 한 줄로 주요 클래스/함수를 쓸 수 있도록
+# 하위 모듈에 흩어진 핵심 요소들을 여기로 끌어모아 다시 노출한다.
+# __all__은 `from agent import *` 시 공개할 이름 목록(공식 공개 API의 정의이기도 하다).
 from .core.agent import Agent
 from .core.async_agent import AsyncAgent
 from .core.context import ContextManager

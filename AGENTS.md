@@ -64,6 +64,12 @@ agent.run("질문")
 `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `OPENROUTER_API_KEY`, `OLLAMA_BASE_URL`  
 `LLM_PROVIDER`, `LLM_MODEL` 으로 기본값 지정 가능.
 
+## 기능 추가
+
+새 기능·모듈·클래스·도구·제공자·메모리를 추가할 때 사용하는 스킬: `.claude/skills/add-feature/`.  
+기존 코드와 동일한 주석 컨벤션(영어 docstring 유지 + 교육용 한국어 설명 주석 추가)을 강제한다.  
+`examples/`·`tests/`에는 주석을 달지 않는다. 작성 후 `verify-project`로 검증.
+
 ## 검증
 
 전체 프로젝트 반복 검증 스킬: `.claude/skills/verify-project/`.  
